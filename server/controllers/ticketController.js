@@ -333,9 +333,9 @@ export async function createTicket(req, res) {
       });
     }
 
-    // Auto-inherit region & office from logged-in user if available
-    const finalRegionId = region_id || (user ? user.region_id : 'REG-03');
-    const finalOfficeId = office_id || (user ? user.office_id : 'OFC-KCU-BDG');
+    // Otomatisasi data regional dan kantor: prioritaskan identitas akun dinas yang sedang login
+    const finalRegionId = (user && user.region_id) ? user.region_id : (region_id || 'REG-03');
+    const finalOfficeId = (user && user.office_id) ? user.office_id : (office_id || 'OFC-KCU-BDG');
 
     // Generate Ticket ID
     const today = new Date();
@@ -543,6 +543,16 @@ export async function addThreadMessage(req, res) {
 
     const ticket = ticketRows[0];
 
+    // Pembatasan Chat: Jika tiket closed, pelapor tidak dapat mengirim pesan baru
+    const isStaff = user && (user.role === 'ADMIN' || user.role === 'ADMIN_PUSAT' || user.role === 'PETUGAS_UPT' || user.role === 'OPERATOR');
+    if (ticket.status === 'closed' && !isStaff) {
+      return res.status(403).json({
+        status: 'error',
+        code: 403,
+        message: 'Tiket ini telah ditutup (Closed). Percakapan telah dinonaktifkan. Silakan ajukan opsi "Ajukan Buka Kembali Tiket" jika kendala masih berlanjut.'
+      });
+    }
+
     // Pelapor / UPT_LUAR checks: can only reply to own ticket or same office, and cannot post internal notes
     let finalVisibility = visibility;
     const isPelapor = user && (user.role === 'UPT_LUAR' || user.role === 'PELAPOR' || user.role === 'pengguna_umum');
@@ -591,5 +601,242 @@ export async function addThreadMessage(req, res) {
   } catch (err) {
     console.error('Error in addThreadMessage:', err);
     return res.status(500).json({ status: 'error', code: 500, message: 'Gagal mengirim pesan.' });
+  }
+}
+
+/**
+ * Request Ticket Reopen (Pelapor mengajukan buka kembali tiket yang closed)
+ */
+export async function requestTicketReopen(req, res) {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const user = req.user;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({
+        status: 'error',
+        code: 400,
+        message: 'Alasan pengajuan buka kembali tiket wajib diisi.'
+      });
+    }
+
+    const [ticketRows] = await pool.query('SELECT * FROM tickets WHERE ticket_id = ? LIMIT 1', [id]);
+    if (ticketRows.length === 0) {
+      return res.status(404).json({ status: 'error', code: 404, message: 'Tiket tidak ditemukan.' });
+    }
+
+    const ticket = ticketRows[0];
+
+    if (ticket.status !== 'closed') {
+      return res.status(400).json({
+        status: 'error',
+        code: 400,
+        message: 'Permohonan buka kembali hanya berlaku untuk tiket yang berstatus Closed.'
+      });
+    }
+
+    // Periksa apakah sudah ada permohonan pending
+    const [existingPending] = await pool.query(
+      "SELECT * FROM ticket_reopen_requests WHERE ticket_id = ? AND status = 'PENDING' LIMIT 1",
+      [id]
+    );
+
+    if (existingPending.length > 0) {
+      return res.status(400).json({
+        status: 'error',
+        code: 400,
+        message: 'Tiket ini sudah memiliki permohonan buka kembali yang sedang menunggu persetujuan Operator UPT Pusat.'
+      });
+    }
+
+    const requestId = `ROP-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const requesterId = user ? user.user_id : 'PUBLIC';
+    const requesterName = user ? user.name : ticket.requester_name;
+    const requesterEmail = user ? user.email : ticket.requester_email;
+
+    await pool.query(`
+      INSERT INTO ticket_reopen_requests (
+        request_id, ticket_id, requester_id, requester_name, requester_email, reason, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', NOW())
+    `, [requestId, id, requesterId, requesterName, requesterEmail, reason.trim()]);
+
+    // Update tickets reopen_status
+    await pool.query("UPDATE tickets SET reopen_status = 'PENDING' WHERE ticket_id = ?", [id]);
+
+    // Add thread notification
+    const threadId = `TH-${Date.now().toString().slice(-6)}`;
+    const reopenNotice = `📢 [PERMOHONAN REOPEN] Pelapor (${requesterName}) mengajukan permohonan buka kembali tiket ini dengan alasan: "${reason.trim()}". Menunggu peninjauan Operator UPT Pusat.`;
+    await pool.query(`
+      INSERT INTO threads (thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility)
+      VALUES (?, ?, ?, ?, ?, ?, 'public')
+    `, [threadId, id, requesterId, requesterName, user ? user.role : 'PELAPOR', reopenNotice]);
+
+    // Audit Log
+    try {
+      await pool.query(`
+        INSERT INTO audit_logs (log_id, ticket_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
+        VALUES (?, ?, ?, ?, 'REOPEN_REQUESTED', 'TICKET', ?, ?, ?)
+      `, [
+        `LOG-${Date.now().toString().slice(-6)}`, id, requesterId, requesterName, user ? user.role : 'PELAPOR', id,
+        `Pengajuan buka kembali tiket #${id}: ${reason.trim()}`,
+        `Permohonan reopen tiket diajukan oleh ${requesterName}`
+      ]);
+    } catch (e) {}
+
+    return res.status(200).json({
+      status: 'success',
+      code: 200,
+      message: 'Permohonan buka kembali tiket berhasil diajukan dan dikirimkan ke Operator UPT Pusat.',
+      data: {
+        request_id: requestId,
+        ticket_id: id,
+        status: 'PENDING'
+      }
+    });
+  } catch (err) {
+    console.error('Error in requestTicketReopen:', err);
+    return res.status(500).json({ status: 'error', code: 500, message: 'Gagal mengajukan permohonan buka kembali tiket.' });
+  }
+}
+
+/**
+ * Review Ticket Reopen (Operator UPT / Pusat menyetujui atau menolak permohonan)
+ */
+export async function reviewTicketReopen(req, res) {
+  try {
+    const { id } = req.params;
+    const { action, note } = req.body;
+    const user = req.user;
+
+    const isStaff = user && (user.role === 'ADMIN' || user.role === 'ADMIN_PUSAT' || user.role === 'PETUGAS_UPT' || user.role === 'OPERATOR');
+    if (!isStaff) {
+      return res.status(403).json({
+        status: 'error',
+        code: 403,
+        message: 'Akses ditolak. Hanya Operator UPT Pusat atau Administrator yang berwenang meninjau permohonan buka kembali tiket.'
+      });
+    }
+
+    if (!action || (action !== 'APPROVE' && action !== 'REJECT')) {
+      return res.status(400).json({ status: 'error', code: 400, message: 'Tindakan verifikasi harus APPROVE atau REJECT.' });
+    }
+
+    const [ticketRows] = await pool.query('SELECT * FROM tickets WHERE ticket_id = ? LIMIT 1', [id]);
+    if (ticketRows.length === 0) {
+      return res.status(404).json({ status: 'error', code: 404, message: 'Tiket tidak ditemukan.' });
+    }
+
+    const [pendingRequests] = await pool.query(
+      "SELECT * FROM ticket_reopen_requests WHERE ticket_id = ? AND status = 'PENDING' ORDER BY created_at DESC LIMIT 1",
+      [id]
+    );
+
+    const targetRequest = pendingRequests[0];
+    const requestId = targetRequest ? targetRequest.request_id : null;
+
+    if (action === 'APPROVE') {
+      // 1. Setujui Reopen: Ubah status tiket menjadi open, kosongkan closed_at, buka kunci chat
+      await pool.query(
+        "UPDATE tickets SET status = 'open', closed_at = NULL, is_archived = 0, reopen_status = 'APPROVED', updated_at = NOW() WHERE ticket_id = ?",
+        [id]
+      );
+
+      if (requestId) {
+        await pool.query(
+          "UPDATE ticket_reopen_requests SET status = 'APPROVED', reviewed_by = ?, reviewer_name = ?, review_note = ?, reviewed_at = NOW() WHERE request_id = ?",
+          [user.user_id, user.name, note || 'Permohonan disetujui', requestId]
+        );
+      }
+
+      // Thread message
+      const threadId = `TH-${Date.now().toString().slice(-6)}`;
+      const approveMessage = `✅ [TIKET DIBUKA KEMBALI] Permohonan buka kembali tiket telah DISETUJUI oleh Petugas UPT (${user.name}). Tiket kini berstatus OPEN dan percakapan kembali aktif. Catatan: "${note || 'Kendala akan ditindaklanjuti kembali.'}"`;
+      await pool.query(`
+        INSERT INTO threads (thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility)
+        VALUES (?, ?, ?, ?, ?, ?, 'public')
+      `, [threadId, id, user.user_id, user.name, user.role, approveMessage]);
+
+      // Audit Log
+      try {
+        await pool.query(`
+          INSERT INTO audit_logs (log_id, ticket_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
+          VALUES (?, ?, ?, ?, 'REOPEN_APPROVED', 'TICKET', ?, ?, ?)
+        `, [
+          `LOG-${Date.now().toString().slice(-6)}`, id, user.user_id, user.name, user.role, id,
+          `Tiket #${id} dibuka kembali (Reopen Approved) oleh ${user.name}`,
+          `Persetujuan permohonan buka kembali tiket`
+        ]);
+      } catch (e) {}
+
+      return res.status(200).json({
+        status: 'success',
+        message: 'Permohonan buka kembali tiket berhasil disetujui. Tiket kini berstatus Open dan percakapan kembali aktif.',
+        data: { ticket_id: id, status: 'open', reopen_status: 'APPROVED' }
+      });
+    } else {
+      // 2. Tolak Reopen: Status tiket tetap closed, chat tetap terkunci
+      await pool.query(
+        "UPDATE tickets SET reopen_status = 'REJECTED', updated_at = NOW() WHERE ticket_id = ?",
+        [id]
+      );
+
+      if (requestId) {
+        await pool.query(
+          "UPDATE ticket_reopen_requests SET status = 'REJECTED', reviewed_by = ?, reviewer_name = ?, review_note = ?, reviewed_at = NOW() WHERE request_id = ?",
+          [user.user_id, user.name, note || 'Permohonan ditolak oleh operator', requestId]
+        );
+      }
+
+      // Thread message
+      const threadId = `TH-${Date.now().toString().slice(-6)}`;
+      const rejectMessage = `❌ [PERMOHONAN REOPEN DITOLAK] Permohonan pembukaan kembali tiket DITOLAK oleh Petugas UPT (${user.name}). Tiket tetap berstatus CLOSED. Alasan penolakan: "${note || 'Masalah telah diselesaikan sesuai SOP dan tidak memerlukan penanganan lanjutan.'}"`;
+      await pool.query(`
+        INSERT INTO threads (thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility)
+        VALUES (?, ?, ?, ?, ?, ?, 'public')
+      `, [threadId, id, user.user_id, user.name, user.role, rejectMessage]);
+
+      // Audit Log
+      try {
+        await pool.query(`
+          INSERT INTO audit_logs (log_id, ticket_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
+          VALUES (?, ?, ?, ?, 'REOPEN_REJECTED', 'TICKET', ?, ?, ?)
+        `, [
+          `LOG-${Date.now().toString().slice(-6)}`, id, user.user_id, user.name, user.role, id,
+          `Permohonan reopen tiket #${id} ditolak oleh ${user.name}: ${note || ''}`,
+          `Penolakan permohonan buka kembali tiket`
+        ]);
+      } catch (e) {}
+
+      return res.status(200).json({
+        status: 'success',
+        message: 'Permohonan buka kembali tiket telah ditolak. Tiket tetap berstatus Closed.',
+        data: { ticket_id: id, status: 'closed', reopen_status: 'REJECTED' }
+      });
+    }
+  } catch (err) {
+    console.error('Error in reviewTicketReopen:', err);
+    return res.status(500).json({ status: 'error', code: 500, message: 'Gagal meninjau permohonan reopen tiket.' });
+  }
+}
+
+/**
+ * Get Reopen Requests for a Ticket
+ */
+export async function getTicketReopenRequests(req, res) {
+  try {
+    const { id } = req.params;
+    const [rows] = await pool.query(
+      'SELECT * FROM ticket_reopen_requests WHERE ticket_id = ? ORDER BY created_at DESC',
+      [id]
+    );
+
+    return res.status(200).json({
+      status: 'success',
+      data: rows
+    });
+  } catch (err) {
+    console.error('Error in getTicketReopenRequests:', err);
+    return res.status(500).json({ status: 'error', code: 500, message: 'Gagal memuat riwayat permohonan reopen.' });
   }
 }

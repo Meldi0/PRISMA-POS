@@ -139,6 +139,7 @@ export interface Ticket {
   assigned_operator?: string;
   sla_due_at: string;
   is_archived?: boolean;
+  reopen_status?: 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED';
   attachments?: Array<{ name: string; size: string; type: string; dataUrl?: string }>;
 }
 
@@ -169,6 +170,34 @@ export interface AuditLogItem {
   created_at: string;
 }
 
+export interface OperatorProductivityItem {
+  user_id: string;
+  name: string;
+  email: string;
+  role: string;
+  position: string;
+  department: string;
+  tickets_handled: number;
+  total_actions: number;
+  tickets_resolved: number;
+  last_active_at: string | null;
+}
+
+export interface TicketReopenRequest {
+  request_id: string;
+  ticket_id: string;
+  requester_id: string;
+  requester_name: string;
+  requester_email: string;
+  reason: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  reviewed_by?: string;
+  reviewer_name?: string;
+  review_note?: string;
+  reviewed_at?: string;
+  created_at: string;
+}
+
 export interface ApiResponse<T = any> {
   status: 'success' | 'error';
   code?: number;
@@ -177,6 +206,8 @@ export interface ApiResponse<T = any> {
   mfa_required?: boolean;
   challenge_token?: string;
   masked_email?: string;
+  smtp_configured?: boolean;
   otp_preview?: string;
   account_status?: AccountStatus;
 }
+

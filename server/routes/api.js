@@ -62,6 +62,9 @@ router.get('/tickets/track/:id', ticketController.trackTicket);
 router.get('/tickets/:id', ticketController.getTicketDetail);
 router.patch('/tickets/:id/status', requireAuth, requirePermission(['ticket.change_status', 'ticket.resolve', 'ticket.close']), ticketController.updateTicketStatus);
 router.post('/tickets/:id/threads', ticketController.addThreadMessage);
+router.post('/tickets/:id/request-reopen', ticketController.requestTicketReopen);
+router.post('/tickets/:id/reopen-review', requireAuth, ticketController.reviewTicketReopen);
+router.get('/tickets/:id/reopen-requests', ticketController.getTicketReopenRequests);
 
 // -------------------------------------------------------------------------------------------------
 // 5. USER REGISTRATION APPROVAL (Admin Pusat)
@@ -99,5 +102,6 @@ router.get('/admin/db-status', requireAuth, analyticsController.getDbStatus);
 // 8. TICKETING MONITORING & ANALYTICS (Scoped)
 // -------------------------------------------------------------------------------------------------
 router.get('/analytics', requireAuth, requirePermission(['monitoring.view', 'analytics.view']), analyticsController.getAnalytics);
+router.get('/analytics/operator-productivity', requireAuth, requirePermission(['operator.stats_view', 'monitoring.view']), analyticsController.getOperatorProductivity);
 
 export default router;

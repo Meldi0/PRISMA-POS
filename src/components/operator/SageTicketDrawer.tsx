@@ -54,11 +54,16 @@ const statusLabels: Record<TicketStatus, string> = {
 };
 
 export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
-  ticket,
+  ticket: propTicket,
   onClose,
   onStatusChange,
   onTicketUpdated
 }) => {
+  const [ticket, setTicket] = useState<Ticket | null>(propTicket);
+
+  useEffect(() => {
+    setTicket(propTicket);
+  }, [propTicket]);
   const { user, hasPermission } = useAuth();
   const { success, error: toastError, info } = useToast();
 
@@ -99,6 +104,9 @@ export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
   const [selectedUpt, setSelectedUpt] = useState(ticket?.assigned_upt || '');
   const [selectedPriority, setSelectedPriority] = useState<TicketPriority>(ticket?.priority || 'Medium');
   const [isSavingTriage, setIsSavingTriage] = useState(false);
+
+  // Reopen review
+  const [isReviewingReopen, setIsReviewingReopen] = useState(false);
 
   useEffect(() => {
     if (ticket?.ticket_id) {
@@ -259,6 +267,46 @@ export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
     }
   };
 
+  const handleInternalStatusChange = (t: Ticket, st: TicketStatus) => {
+    setTicket((prev) => (prev ? { ...prev, status: st, is_archived: st === 'closed' } : null));
+    onStatusChange(t, st);
+  };
+
+  const handleReviewReopen = async (action: 'APPROVE' | 'REJECT') => {
+    if (!ticket || isReviewingReopen) return;
+    setIsReviewingReopen(true);
+    try {
+      const res = await apiService.reviewTicketReopen(ticket.ticket_id, action, '');
+      if (res.status === 'success') {
+        success(action === 'APPROVE' ? 'Tiket berhasil dibuka kembali.' : 'Permohonan buka kembali ditolak.');
+        
+        // Update state tiket seketika agar banner kuning HILANG dan status langsung sinkron
+        setTicket((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: action === 'APPROVE' ? 'open' : 'closed',
+                reopen_status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+                is_archived: action === 'APPROVE' ? false : prev.is_archived
+              }
+            : null
+        );
+
+        // Muat ulang thread agar pesan persetujuan/penolakan langsung muncul
+        await fetchThreads(ticket.ticket_id, true);
+
+        // Beritahu parent dashboard agar sinkronisasi tabel utama
+        if (onTicketUpdated) onTicketUpdated();
+      } else {
+        toastError(res.message || 'Gagal memproses permohonan.');
+      }
+    } catch (err: any) {
+      toastError(err.message || 'Terjadi gangguan koneksi.');
+    } finally {
+      setIsReviewingReopen(false);
+    }
+  };
+
   const getInitials = (name?: string) => {
     if (!name) return 'OP';
     const parts = name.trim().split(' ');
@@ -341,7 +389,7 @@ export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
                     {canChangeStatus && (
                       <button
                         type="button"
-                        onClick={() => onStatusChange(ticket, 'in_progress')}
+                        onClick={() => handleInternalStatusChange(ticket, 'in_progress')}
                         className="flex items-center gap-1.5 px-3 py-1 rounded-[6px] text-[11px] font-bold bg-[#EFF6FF] border border-[#BAE6FD] text-[#0284C7] hover:bg-[#0284C7] hover:text-white transition-all cursor-pointer shadow-2xs"
                         title="Buka kembali tiket ini ke antrean kerja aktif"
                       >
@@ -359,7 +407,7 @@ export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
                         {nextStatuses.map((st) => (
                           <button
                             key={st}
-                            onClick={() => onStatusChange(ticket, st)}
+                            onClick={() => handleInternalStatusChange(ticket, st)}
                             className="px-2.5 py-1 rounded-[6px] text-[11px] font-bold bg-white border border-[#E2E8F0] text-[#0D5C75] hover:bg-[#0D5C75] hover:text-white transition-all cursor-pointer"
                           >
                             → {statusLabels[st]}
@@ -495,6 +543,54 @@ export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
                       })
                     )}
                   </div>
+
+                  {/* Reopen Request Review Banner (Operator only) */}
+                  {ticket.status === 'closed' && ticket.reopen_status === 'PENDING' && canChangeStatus && (
+                    <div className="p-4 rounded-[12px] bg-amber-50 border border-amber-200 space-y-3">
+                      <div className="flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-[10px] bg-amber-100 flex items-center justify-center flex-shrink-0">
+                          <RotateCcw size={15} className="text-amber-600" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-amber-800">Permintaan Buka Kembali Tiket</p>
+                          <p className="text-[11px] text-amber-700 mt-0.5">
+                            Pelapor mengajukan permintaan untuk membuka kembali tiket ini. Tinjau permintaan dan tentukan keputusan Anda.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={isReviewingReopen}
+                          onClick={() => handleReviewReopen('REJECT')}
+                          className="flex-1 h-9 rounded-[8px] border border-red-200 bg-red-50 text-red-700 text-xs font-bold hover:bg-red-100 transition-all disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+                        >
+                          <X size={13} />
+                          Tolak
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isReviewingReopen}
+                          onClick={() => handleReviewReopen('APPROVE')}
+                          className="flex-1 h-9 rounded-[8px] bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+                        >
+                          <CheckCircle2 size={13} />
+                          {isReviewingReopen ? 'Memproses...' : 'Setujui & Buka Kembali'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Closed ticket banner for operator when no pending reopen */}
+                  {ticket.status === 'closed' && ticket.reopen_status !== 'PENDING' && (
+                    <div className="flex items-center gap-2.5 p-3 rounded-[10px] bg-slate-50 border border-slate-200">
+                      <Archive size={14} className="text-slate-400 flex-shrink-0" />
+                      <p className="text-xs text-slate-500">
+                        Tiket ini berstatus <span className="font-bold text-slate-700">Ditutup</span>. Chat pelapor dinonaktifkan.
+                        {ticket.reopen_status === 'REJECTED' && <span className="ml-1 text-red-600 font-semibold">(Permohonan buka kembali telah ditolak)</span>}
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -600,8 +696,8 @@ export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
 
             </div>
 
-            {/* Bottom Reply Box (Always Available on Discussion Tab) */}
-            {activeTab === 'diskusi' && (
+            {/* Bottom Reply Box (Only for non-closed tickets on Discussion Tab) */}
+            {activeTab === 'diskusi' && ticket?.status !== 'closed' && (
               <form onSubmit={handleSendReply} className="p-4 border-t border-[#E2E8F0] bg-white flex-shrink-0 space-y-2.5">
                 <div className="flex items-center justify-between">
                   {/* Internal Note Toggle */}

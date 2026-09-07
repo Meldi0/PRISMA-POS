@@ -31,6 +31,7 @@ interface AuthContextType {
     mfa_required?: boolean;
     challenge_token?: string;
     masked_email?: string;
+    smtp_configured?: boolean;
     otp_preview?: string;
     account_status?: AccountStatus;
   }>;
@@ -138,6 +139,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           mfa_required: true,
           challenge_token: res.challenge_token,
           masked_email: res.masked_email,
+          smtp_configured: res.smtp_configured,
           otp_preview: res.otp_preview,
           message: res.message || 'Verifikasi Multi-Factor Authentication (MFA) diperlukan.'
         };

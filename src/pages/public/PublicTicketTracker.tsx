@@ -19,7 +19,10 @@ import {
   BellRing,
   Sparkles,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Lock,
+  RotateCcw,
+  X
 } from 'lucide-react';
 import { StepperTimeline, Stage } from '../../components/features/StepperTimeline';
 import { SlaCountdown } from '../../components/features/SlaCountdown';
@@ -56,6 +59,11 @@ export const PublicTicketTracker: React.FC = () => {
   const [replyMessage, setReplyMessage] = useState('');
   const [isSendingReply, setIsSendingReply] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
+
+  // Reopen Request Modal & States
+  const [showReopenModal, setShowReopenModal] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
+  const [isSubmittingReopen, setIsSubmittingReopen] = useState(false);
   
   // Realtime Customer Notification States
   const [hasNotificationPermission, setHasNotificationPermission] = useState(true);
@@ -290,10 +298,32 @@ export const PublicTicketTracker: React.FC = () => {
         success('Tanggapan Anda berhasil dikirimkan.');
         await fetchTicket(ticket.ticket_id, email, false);
       }
-    } catch (err) {
-      console.warn('Reply error:', err);
+    } catch (err: any) {
+      error(err.message || 'Gagal mengirimkan balasan pesan.');
     } finally {
       setIsSendingReply(false);
+    }
+  };
+
+  const handleRequestReopen = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ticket || !reopenReason.trim() || isSubmittingReopen) return;
+
+    setIsSubmittingReopen(true);
+    try {
+      const res = await apiService.requestTicketReopen(ticket.ticket_id, reopenReason.trim());
+      if (res.status === 'success') {
+        success('Permohonan buka kembali tiket berhasil diajukan dan dikirim ke Operator UPT Pusat.');
+        setShowReopenModal(false);
+        setReopenReason('');
+        fetchTicket(ticket.ticket_id, email, false);
+      } else {
+        error(res.message || 'Gagal mengajukan buka kembali tiket.');
+      }
+    } catch (err: any) {
+      error(err.message || 'Terjadi gangguan koneksi.');
+    } finally {
+      setIsSubmittingReopen(false);
     }
   };
 
@@ -587,29 +617,157 @@ export const PublicTicketTracker: React.FC = () => {
                 </div>
               )}
 
-              {/* Reply Form */}
-              <form onSubmit={handleSendCustomerReply} className="pt-2 flex gap-2">
-                <input
-                  type="text"
-                  required
-                  placeholder="Ketik tanggapan atau informasi tambahan untuk teknisi..."
-                  value={replyMessage}
-                  onChange={(e) => setReplyMessage(e.target.value)}
-                  className="flex-1 h-10 px-3.5 rounded-[10px] bg-[#F8FAFC] border border-[#E2E8F0] text-xs sm:text-sm text-[#0F172A] placeholder-[#94A3B8] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#199FB1]/30 focus:border-[#199FB1] transition-all"
-                />
-                <button
-                  type="submit"
-                  disabled={isSendingReply || !replyMessage.trim()}
-                  className="h-10 px-5 rounded-[10px] bg-[#0D5C75] hover:bg-[#083342] text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer flex-shrink-0"
-                >
-                  <Send size={14} />
-                  <span>{isSendingReply ? 'Mengirim...' : 'Kirim'}</span>
-                </button>
-              </form>
+              {/* Reply Form / Closed Ticket Lock */}
+              {ticket?.status === 'closed' ? (
+                <div className="pt-2 space-y-2">
+                  {ticket.reopen_status === 'PENDING' ? (
+                    /* Amber pending banner */
+                    <div className="flex items-start gap-3 p-3.5 rounded-[12px] bg-amber-50 border border-amber-200">
+                      <Clock size={16} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-amber-700">Permohonan Buka Kembali Sedang Diproses</p>
+                        <p className="text-xs text-amber-600 mt-0.5">
+                          Permohonan Anda sedang menunggu keputusan dari Operator UPT. Anda akan diberitahu setelah ada keputusan.
+                        </p>
+                      </div>
+                    </div>
+                  ) : ticket.reopen_status === 'REJECTED' ? (
+                    /* Red rejected banner */
+                    <div className="flex items-start gap-3 p-3.5 rounded-[12px] bg-red-50 border border-red-200">
+                      <AlertCircle size={16} className="text-red-500 mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-red-700">Permohonan Buka Kembali Ditolak</p>
+                        <p className="text-xs text-red-600 mt-0.5">
+                          Permohonan buka kembali tiket Anda telah ditolak oleh Operator. Tiket tetap berstatus ditutup.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Default closed lock */
+                    <div className="flex items-start gap-3 p-3.5 rounded-[12px] bg-slate-50 border border-slate-200">
+                      <Lock size={16} className="text-slate-400 mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-slate-600">Tiket Ini Telah Ditutup</p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Kolom percakapan dinonaktifkan. Jika masalah Anda belum terselesaikan, Anda dapat mengajukan permintaan untuk membuka kembali tiket ini.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowReopenModal(true)}
+                        className="flex-shrink-0 flex items-center gap-1.5 h-8 px-3 rounded-[8px] bg-[#0D5C75] hover:bg-[#083342] text-white text-xs font-bold transition-all cursor-pointer"
+                      >
+                        <RotateCcw size={12} />
+                        <span className="hidden sm:inline">Ajukan Buka Kembali</span>
+                        <span className="sm:hidden">Buka Kembali</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Normal reply form for non-closed tickets */
+                <form onSubmit={handleSendCustomerReply} className="pt-2 flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ketik tanggapan atau informasi tambahan untuk teknisi..."
+                    value={replyMessage}
+                    onChange={(e) => setReplyMessage(e.target.value)}
+                    className="flex-1 h-10 px-3.5 rounded-[10px] bg-[#F8FAFC] border border-[#E2E8F0] text-xs sm:text-sm text-[#0F172A] placeholder-[#94A3B8] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#199FB1]/30 focus:border-[#199FB1] transition-all"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isSendingReply || !replyMessage.trim()}
+                    className="h-10 px-5 rounded-[10px] bg-[#0D5C75] hover:bg-[#083342] text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer flex-shrink-0"
+                  >
+                    <Send size={14} />
+                    <span>{isSendingReply ? 'Mengirim...' : 'Kirim'}</span>
+                  </button>
+                </form>
+              )}
             </div>
           </motion.div>
         )}
       </div>
+
+      {/* Reopen Request Modal */}
+      <AnimatePresence>
+        {showReopenModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+            onClick={(e) => { if (e.target === e.currentTarget) setShowReopenModal(false); }}
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 20 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+              className="bg-white rounded-[18px] shadow-2xl w-full max-w-md border border-[#E2E8F0]"
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-[#F1F5F9]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-[10px] bg-[#EAF4F8] flex items-center justify-center">
+                    <RotateCcw size={15} className="text-[#0D5C75]" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-[#0F172A]">Ajukan Buka Kembali Tiket</h3>
+                    <p className="text-[11px] text-[#94A3B8]">Permintaan akan ditinjau oleh Operator UPT</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowReopenModal(false)}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-[#94A3B8] hover:bg-slate-100 hover:text-slate-600 transition-all cursor-pointer"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <form onSubmit={handleRequestReopen} className="p-5 space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-[#334155] mb-1.5">
+                    Alasan Pengajuan <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    required
+                    rows={4}
+                    value={reopenReason}
+                    onChange={(e) => setReopenReason(e.target.value)}
+                    placeholder="Jelaskan mengapa tiket perlu dibuka kembali, misalnya: masalah belum terselesaikan, muncul kembali setelah beberapa hari, dll."
+                    className="w-full px-3.5 py-2.5 rounded-[10px] bg-[#F8FAFC] border border-[#E2E8F0] text-xs sm:text-sm text-[#0F172A] placeholder-[#94A3B8] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#199FB1]/30 focus:border-[#199FB1] transition-all resize-none leading-relaxed"
+                  />
+                  <p className="text-[11px] text-[#94A3B8] mt-1">
+                    Alasan yang jelas akan mempercepat proses peninjauan oleh operator.
+                  </p>
+                </div>
+
+                <div className="flex gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => { setShowReopenModal(false); setReopenReason(''); }}
+                    className="flex-1 h-10 rounded-[10px] border border-[#E2E8F0] text-xs font-semibold text-[#64748B] hover:bg-slate-50 transition-all cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingReopen || !reopenReason.trim()}
+                    className="flex-1 h-10 rounded-[10px] bg-[#0D5C75] hover:bg-[#083342] text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                  >
+                    <RotateCcw size={13} />
+                    {isSubmittingReopen ? 'Mengajukan...' : 'Ajukan Permohonan'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Footer */}
       <footer className="border-t border-[#E2E8F0] bg-white py-4 text-center text-xs text-[#94A3B8]">

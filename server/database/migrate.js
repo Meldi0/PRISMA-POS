@@ -127,6 +127,24 @@ export async function runMigration() {
         is_revoked TINYINT(1) NOT NULL DEFAULT 0,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         KEY idx_sessions_user (user_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+      // 10. Tabel ticket_reopen_requests (Permohonan Pembukaan Kembali Tiket Tertutup)
+      `CREATE TABLE IF NOT EXISTS ticket_reopen_requests (
+        request_id VARCHAR(50) NOT NULL PRIMARY KEY,
+        ticket_id VARCHAR(50) NOT NULL,
+        requester_id VARCHAR(50) NOT NULL,
+        requester_name VARCHAR(150) NOT NULL,
+        requester_email VARCHAR(150) NOT NULL,
+        reason TEXT NOT NULL,
+        status ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+        reviewed_by VARCHAR(50) DEFAULT NULL,
+        reviewer_name VARCHAR(150) DEFAULT NULL,
+        review_note TEXT DEFAULT NULL,
+        reviewed_at DATETIME DEFAULT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_reopen_ticket (ticket_id),
+        KEY idx_reopen_status (status)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     ];
 
@@ -175,6 +193,10 @@ export async function runMigration() {
     await addColumnIfNotExists('tickets', 'region_id', "VARCHAR(50) DEFAULT NULL AFTER location");
     await addColumnIfNotExists('tickets', 'office_id', "VARCHAR(50) DEFAULT NULL AFTER region_id");
     await addColumnIfNotExists('tickets', 'is_archived', "TINYINT(1) NOT NULL DEFAULT 0 AFTER closed_at");
+    await addColumnIfNotExists('tickets', 'reopen_status', "ENUM('NONE', 'PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'NONE' AFTER is_archived");
+
+    // Kolom pada mfa_challenges
+    await addColumnIfNotExists('mfa_challenges', 'otp_code', "VARCHAR(10) DEFAULT NULL AFTER user_id");
 
     // Pastikan deskripsi dan message adalah LONGTEXT
     try {
@@ -298,6 +320,7 @@ export async function runMigration() {
       { code: 'monitoring.view', name: 'Melihat Monitoring Kinerja Tiket', module: 'monitoring', action: 'view', desc: 'Akses visual metrik performa tiket, backlog & status' },
       { code: 'analytics.view', name: 'Melihat Analytics & Tren Tiket', module: 'analytics', action: 'view', desc: 'Analisis statistik volume dan kategori tiket' },
       { code: 'sla.view', name: 'Melihat Performa SLA', module: 'sla', action: 'view', desc: 'Pemantauan kepatuhan Service Level Agreement tiket' },
+      { code: 'operator.stats_view', name: 'Melihat Rekap Produktivitas Operator', module: 'operator', action: 'view_stats', desc: 'Melihat statistik dan rekap jumlah tiket yang ditangani oleh masing-masing operator (Khusus Manager / Atasan)' },
 
       // Module: User Management & Access Control
       { code: 'user.view', name: 'Melihat Daftar Pengguna', module: 'user', action: 'view', desc: 'Melihat daftar staf dan pengguna terdaftar' },

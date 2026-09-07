@@ -22,7 +22,9 @@ import {
   RotateCcw,
   Sparkles,
   Eye,
-  Clock
+  Clock,
+  Building2,
+  Lock
 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { StatusBadge, PriorityBadge } from '../../components/ui/Badge';
@@ -383,8 +385,8 @@ export const PublicTicketForm: React.FC = () => {
         department: currentDepartment.name,
         topic: selectedTopic,
         location: workLocation.trim(),
-        region_id: selectedRegionId,
-        office_id: selectedOfficeId,
+        region_id: user?.region_id || selectedRegionId || 'REG-03',
+        office_id: user?.office_id || selectedOfficeId || 'OFC-KCU-BDG',
         description: description.trim(),
         priority,
         requester_email: requesterEmail.trim().toLowerCase(),
@@ -641,37 +643,59 @@ export const PublicTicketForm: React.FC = () => {
               </div>
             </div>
 
-            {/* Wilayah Regional & Kantor Cabang / Kantor Pos */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-[12px] bg-[#F8FAFC] border border-[#E2E8F0]">
-              <div>
-                <label className="block text-[13px] font-semibold text-[#0F172A] mb-1.5">
-                  Wilayah Regional Pos <span className="text-[#EF4444]">*</span>
-                </label>
-                <SearchableSelect
-                  options={regionOptions}
-                  value={selectedRegionId}
-                  onChange={(val) => setSelectedRegionId(val)}
-                  placeholder="Pilih Wilayah Regional..."
-                  searchPlaceholder="Cari nama atau kode regional..."
-                  required
-                />
-                <p className="text-[11px] text-[#64748B] mt-1">Menentukan regional pemantau tiket</p>
+            {/* Unit Kerja Terdeteksi Otomatis (Otomatisasi Akun Kedinasan) */}
+            <div className="p-4 rounded-[14px] bg-[#F0F9FF] border border-[#BAE6FD] space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Building2 size={16} className="text-[#0D5C75]" />
+                  <span className="text-[13px] font-bold text-[#083342]">
+                    Identitas Unit Kerja Pelapor (Otomatis Terisi & Dikunci)
+                  </span>
+                </div>
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0369A1] bg-white px-2.5 py-0.5 rounded-full border border-[#BAE6FD]">
+                  <Lock size={11} />
+                  <span>Profil Akun Terverifikasi</span>
+                </span>
               </div>
 
-              <div>
-                <label className="block text-[13px] font-semibold text-[#0F172A] mb-1.5">
-                  Kantor Cabang / Kantor Pos <span className="text-[#EF4444]">*</span>
-                </label>
-                <SearchableSelect
-                  options={officeOptions}
-                  value={selectedOfficeId}
-                  onChange={(val) => setSelectedOfficeId(val)}
-                  placeholder="Pilih Kantor Cabang / KC..."
-                  searchPlaceholder="Cari nama cabang, tipe (KCU/KC), kode..."
-                  emptyMessage="Tidak ada kantor cabang ditemukan pada regional ini"
-                  required
-                />
-                <p className="text-[11px] text-[#64748B] mt-1">Cari cepat cabang pelaksana penanganan</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Wilayah Regional (Otomatis) */}
+                <div className="p-3 bg-white rounded-[10px] border border-[#BAE6FD]/80 shadow-2xs">
+                  <span className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider block mb-1">
+                    Wilayah Regional
+                  </span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13px] font-bold text-[#0F172A]">
+                      {user?.region_name || 'Regional 3 Jawa Barat & Banten'}
+                    </span>
+                    <span className="text-[10px] font-mono font-bold bg-[#EAF4F8] text-[#0D5C75] px-2 py-0.5 rounded">
+                      {user?.region_code || 'REG-03'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-[#64748B] mt-1 flex items-center gap-1">
+                    <CheckCircle size={10} className="text-[#10B981]" />
+                    <span>Otomatis dari identitas akun login</span>
+                  </p>
+                </div>
+
+                {/* Kantor Pos / Cabang (Otomatis) */}
+                <div className="p-3 bg-white rounded-[10px] border border-[#BAE6FD]/80 shadow-2xs">
+                  <span className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider block mb-1">
+                    Kantor Cabang / Kantor Pos
+                  </span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13px] font-bold text-[#0F172A] truncate max-w-[200px]" title={user?.office_name || 'KCU Bandung 40000'}>
+                      {user?.office_name || 'KCU Bandung 40000'}
+                    </span>
+                    <span className="text-[10px] font-mono font-bold bg-[#EAF4F8] text-[#0D5C75] px-2 py-0.5 rounded">
+                      {user?.office_code || '40100'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-[#64748B] mt-1 flex items-center gap-1">
+                    <CheckCircle size={10} className="text-[#10B981]" />
+                    <span>Kantor asal pelapor (tidak perlu dipilih ulang)</span>
+                  </p>
+                </div>
               </div>
             </div>
 

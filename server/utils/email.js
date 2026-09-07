@@ -16,9 +16,22 @@ const smtpUser = process.env.SMTP_USER || '';
 const smtpPass = process.env.SMTP_PASS || '';
 const emailFrom = process.env.EMAIL_FROM || (smtpUser ? `"PRISMA POS Helpdesk" <${smtpUser}>` : '"PRISMA POS Helpdesk" <no-reply@poso.local>');
 
-const isSmtpConfigured = Boolean(smtpUser && smtpPass);
+export function isSmtpReady() {
+  const user = (process.env.SMTP_USER || '').trim();
+  const pass = (process.env.SMTP_PASS || '').trim();
+  return Boolean(
+    user &&
+    pass &&
+    !user.includes('emailkamu@') &&
+    !user.includes('your-account@') &&
+    !pass.includes('xxxx') &&
+    !pass.includes('YOUR_')
+  );
+}
 
-if (isSmtpConfigured) {
+export const isSmtpConfigured = isSmtpReady();
+
+if (isSmtpReady()) {
   transporter = nodemailer.createTransport({
     host: smtpHost,
     port: smtpPort,

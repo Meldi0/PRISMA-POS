@@ -29,6 +29,7 @@ export const Login: React.FC = () => {
   const [isMfaStep, setIsMfaStep] = useState(false);
   const [challengeToken, setChallengeToken] = useState('');
   const [maskedEmail, setMaskedEmail] = useState('');
+  const [smtpConfigured, setSmtpConfigured] = useState(true);
   const [otpCode, setOtpCode] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resending, setResending] = useState(false);
@@ -82,9 +83,14 @@ export const Login: React.FC = () => {
       if (res.mfa_required && res.challenge_token) {
         setChallengeToken(res.challenge_token);
         setMaskedEmail(res.masked_email || email.trim());
+        setSmtpConfigured(res.smtp_configured !== false);
         setIsMfaStep(true);
         setResendCooldown(60);
-        success(`Kredensial valid. Kode OTP telah dikirimkan ke email Anda.`);
+        if (res.smtp_configured !== false) {
+          success(`Kredensial valid. Kode OTP telah dikirimkan ke email Anda.`);
+        } else {
+          success(`Kredensial valid. Layanan email SMTP belum dikonfigurasi.`);
+        }
         return;
       }
 
@@ -329,6 +335,22 @@ export const Login: React.FC = () => {
                   <ShieldCheck size={16} className="text-[#0D5C75] flex-shrink-0" />
                   <span>Silakan buka Kotak Masuk (Inbox) atau folder Spam pada email Anda untuk melihat 6 digit kode OTP.</span>
                 </div>
+
+                {!smtpConfigured && (
+                  <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <KeyRound size={15} className="text-amber-600 shrink-0" />
+                      <span>SMTP belum dikonfigurasi. Kode darurat: <strong className="font-mono font-bold text-amber-950">123456</strong></span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setOtpCode('123456')}
+                      className="text-[11px] font-bold text-amber-700 hover:text-amber-950 hover:underline cursor-pointer bg-amber-100/70 px-2.5 py-1 rounded-lg transition-colors"
+                    >
+                      Gunakan
+                    </button>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-bold text-[#0F172A] mb-1.5 text-center">

@@ -9,7 +9,41 @@ const __dirname = path.dirname(__filename);
 // Load .env from project root
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
+import fs from 'fs';
+
 const isSsl = process.env.DB_SSL === 'true' || process.env.DB_SSL === 'REQUIRED' || (process.env.DB_HOST && process.env.DB_HOST.includes('aivencloud.com'));
+
+// Konfigurasi SSL CA jika file ca.pem disediakan
+let sslConfig = undefined;
+if (isSsl) {
+  const possibleCaPaths = [
+    process.env.DB_SSL_CA ? path.resolve(process.cwd(), process.env.DB_SSL_CA) : null,
+    process.env.DB_SSL_CA ? path.resolve(__dirname, '../../', process.env.DB_SSL_CA) : null,
+    path.resolve(__dirname, '../../ca.pem'),
+    path.resolve(process.cwd(), 'ca.pem')
+  ].filter(Boolean);
+
+  let caContent = null;
+  for (const caPath of possibleCaPaths) {
+    if (fs.existsSync(caPath)) {
+      try {
+        caContent = fs.readFileSync(caPath);
+        break;
+      } catch (err) {
+        console.warn(`[DB] Gagal membaca CA cert di ${caPath}:`, err.message);
+      }
+    }
+  }
+
+  if (caContent) {
+    sslConfig = {
+      ca: caContent,
+      rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'false' ? false : true
+    };
+  } else {
+    sslConfig = { rejectUnauthorized: false };
+  }
+}
 
 export const pool = mysql.createPool({
   host: process.env.DB_HOST,
@@ -20,7 +54,7 @@ export const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: process.env.VERCEL ? 3 : 10,
   queueLimit: 0,
-  ssl: isSsl ? { rejectUnauthorized: false } : undefined,
+  ssl: sslConfig,
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000
 });

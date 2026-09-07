@@ -3,7 +3,7 @@ import { pool } from '../config/db.js';
 import { hashPassword, verifyPassword, generateToken } from '../utils/auth.js';
 import { generateTotpSecret, generateTotpUri, verifyTotp, generateBackupCodes } from '../utils/totp.js';
 import { resolveUserPermissions } from '../utils/permissions.js';
-import { sendOtpEmail } from '../utils/email.js';
+import { sendOtpEmail, isSmtpReady } from '../utils/email.js';
 
 function maskEmail(email) {
   if (!email || !email.includes('@')) return email;
@@ -132,65 +132,52 @@ export async function login(req, res) {
       });
     }
 
-    // Reset failed attempts & update last login
-    await pool.query('UPDATE users SET failed_attempts = 0, locked_until = NULL, last_login_at = NOW() WHERE user_id = ?', [user.user_id]);
+    // Reset failed attempts & clear lockout
+    await pool.query('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE user_id = ?', [user.user_id]);
 
-    // Fetch full user record with Region and Office details
-    const [userRows] = await pool.query(
-      `SELECT 
-        u.user_id, u.name, u.email, u.role, u.is_active, u.account_status,
-        u.region_id, u.office_id, u.data_scope, u.position, u.mfa_enabled,
-        u.nip, u.department, u.role_title,
-        r.name AS regional_name, r.code AS regional_code,
-        o.name AS office_name, o.code AS office_code
-      FROM users u
-      LEFT JOIN regions r ON u.region_id = r.region_id
-      LEFT JOIN offices o ON u.office_id = o.office_id
-      WHERE u.user_id = ? LIMIT 1`,
-      [user.user_id]
+    // Generate MFA Challenge for Multi-Factor Authentication (MFA Login for all accounts)
+    const challengeToken = crypto.randomBytes(32).toString('hex');
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 menit masa berlaku
+    const challengeId = `CHAL-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    await pool.query(
+      `INSERT INTO mfa_challenges (challenge_id, challenge_token, user_id, otp_code, expires_at, is_used, attempts)
+       VALUES (?, ?, ?, ?, ?, 0, 0)`,
+      [challengeId, challengeToken, user.user_id, otpCode, expiresAt]
     );
 
-    const fullUser = userRows[0] || user;
-    const permResolution = await resolveUserPermissions(fullUser.user_id, fullUser.role);
+    // Send OTP email (gracefully handled if SMTP is unconfigured)
+    try {
+      await sendOtpEmail({
+        toEmail: user.email,
+        recipientName: user.name,
+        otpCode: otpCode
+      });
+    } catch (mailErr) {
+      console.warn('Notice: Failed to send OTP email (SMTP might be unconfigured):', mailErr.message);
+    }
 
-    const userPayload = {
-      user_id: fullUser.user_id,
-      name: fullUser.name,
-      email: fullUser.email,
-      role: fullUser.role,
-      account_status: fullUser.account_status || 'ACTIVE',
-      data_scope: fullUser.data_scope,
-      region_id: fullUser.region_id,
-      office_id: fullUser.office_id,
-      region_name: fullUser.regional_name,
-      region_code: fullUser.regional_code,
-      office_name: fullUser.office_name,
-      office_code: fullUser.office_code,
-      position: fullUser.position,
-      nip: fullUser.nip,
-      department: fullUser.department,
-      role_title: fullUser.role_title,
-      permissions: permResolution.allowedCodes
-    };
-
-    const token = generateToken(userPayload);
-
-    // Audit Log Login Sukses
+    // Audit Log Tantangan MFA
     try {
       await pool.query(`
         INSERT INTO audit_logs (log_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description, ip_address)
-        VALUES (?, ?, ?, ?, 'LOGIN_SUCCESS', 'SESSION', ?, 'Login berhasil langsung', 'Autentikasi akun berhasil', ?)
-      `, [`LOG-${Date.now().toString().slice(-6)}`, fullUser.user_id, fullUser.name, fullUser.role, fullUser.user_id, req.ip]);
+        VALUES (?, ?, ?, ?, 'MFA_CHALLENGE', 'SECURITY', ?, 'Challenge OTP dibuat untuk verifikasi login', 'Permintaan MFA 2FA Login', ?)
+      `, [`LOG-${Date.now().toString().slice(-6)}`, user.user_id, user.name, user.role, user.user_id, req.ip]);
     } catch (e) {}
+
+    const masked = maskEmail(user.email);
 
     return res.status(200).json({
       status: 'success',
       code: 200,
-      message: 'Berhasil masuk ke dalam sistem.',
-      data: {
-        token,
-        user: userPayload
-      }
+      mfa_required: true,
+      challenge_token: challengeToken,
+      masked_email: masked,
+      smtp_configured: isSmtpReady(),
+      message: isSmtpReady()
+        ? `Kredensial akun valid. Kode OTP 6-digit telah dikirimkan ke email ${masked}. Silakan masukkan kode untuk menyelesaikan autentikasi dinas.`
+        : `Kredensial akun valid. Layanan email SMTP belum dikonfigurasi. Silakan gunakan kode darurat untuk masuk.`
     });
 
   } catch (err) {

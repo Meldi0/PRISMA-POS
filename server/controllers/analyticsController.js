@@ -237,3 +237,100 @@ export async function getDbStatus(req, res) {
     });
   }
 }
+
+/**
+ * Rekap Aktivitas & Produktivitas Operator per Akun Atasan (Manager)
+ * Hanya dapat diakses oleh akun Manager/Atasan (role ADMIN atau memiliki permission 'operator.stats_view')
+ * Perhitungan didasarkan pada aktivitas nyata tiket (audit logs & thread responses)
+ */
+export async function getOperatorProductivity(req, res) {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ status: 'error', code: 401, message: 'Autentikasi diperlukan.' });
+    }
+
+    const isAdmin = user.role === 'ADMIN' || user.role === 'ADMIN_PUSAT' || user.role === 'admin';
+    const permissions = user.permissions || [];
+    const canView = isAdmin || permissions.includes('*') || permissions.includes('operator.stats_view');
+
+    if (!canView) {
+      return res.status(403).json({
+        status: 'error',
+        code: 403,
+        message: 'Akses ditolak. Rekap statistik produktivitas operator hanya dapat dilihat oleh akun Manager/Atasan.'
+      });
+    }
+
+    // Ambil daftar operator UPT & Admin beserta rekap tindakan nyata pada tiket
+    const [rows] = await pool.query(`
+      SELECT 
+        u.user_id,
+        u.name,
+        u.email,
+        u.role,
+        u.position,
+        u.department,
+        COUNT(DISTINCT activity.ticket_id) AS tickets_handled,
+        COUNT(activity.log_id) AS total_actions,
+        SUM(CASE WHEN activity.is_resolve = 1 THEN 1 ELSE 0 END) AS tickets_resolved,
+        MAX(activity.created_at) AS last_active_at
+      FROM users u
+      LEFT JOIN (
+        -- 1. Tindakan operasional di audit_logs
+        SELECT 
+          actor_id AS user_id, 
+          ticket_id, 
+          log_id, 
+          created_at,
+          CASE WHEN action IN ('RESOLVE_TICKET', 'CLOSE_TICKET') OR details LIKE '%closed%' THEN 1 ELSE 0 END AS is_resolve
+        FROM audit_logs
+        WHERE ticket_id IS NOT NULL 
+          AND action IN ('STATUS_CHANGE', 'RESOLVE_TICKET', 'CLOSE_TICKET', 'CLAIM_TICKET', 'ASSIGN_TICKET', 'TRIAGE')
+        
+        UNION ALL
+        
+        -- 2. Respon pesan balasan operator pada thread percakapan tiket
+        SELECT 
+          sender_id AS user_id, 
+          ticket_id, 
+          thread_id AS log_id, 
+          created_at,
+          0 AS is_resolve
+        FROM threads
+        WHERE sender_role IN ('PETUGAS_UPT', 'OPERATOR', 'ADMIN', 'admin', 'upt')
+      ) activity ON u.user_id = activity.user_id
+      WHERE u.role IN ('PETUGAS_UPT', 'OPERATOR', 'ADMIN', 'admin', 'upt')
+      GROUP BY u.user_id, u.name, u.email, u.role, u.position, u.department
+      ORDER BY tickets_handled DESC, total_actions DESC, u.name ASC
+    `);
+
+    const productivityList = rows.map(r => ({
+      user_id: r.user_id,
+      name: r.name,
+      email: r.email,
+      role: r.role,
+      position: r.position || 'Petugas Helpdesk UPT',
+      department: r.department || 'Pusat Pengendalian Operasi',
+      tickets_handled: Number(r.tickets_handled || 0),
+      total_actions: Number(r.total_actions || 0),
+      tickets_resolved: Number(r.tickets_resolved || 0),
+      last_active_at: r.last_active_at || null
+    }));
+
+    return res.status(200).json({
+      status: 'success',
+      code: 200,
+      data: productivityList,
+      total_operators: productivityList.length
+    });
+  } catch (err) {
+    console.error('Error in getOperatorProductivity:', err);
+    return res.status(500).json({
+      status: 'error',
+      code: 500,
+      message: 'Gagal memuat rekap aktivitas operator.'
+    });
+  }
+}
+

@@ -10,7 +10,9 @@ import {
   Role,
   Permission,
   RegistrationApproval,
-  AuditLogItem
+  AuditLogItem,
+  OperatorProductivityItem,
+  TicketReopenRequest
 } from '../types';
 
 const STORAGE_KEYS = {
@@ -551,6 +553,38 @@ class PosoApiService {
 
   async getAnalytics(): Promise<ApiResponse<any>> {
     return this.request('/analytics', { method: 'GET' });
+  }
+
+  async getOperatorProductivity(): Promise<ApiResponse<OperatorProductivityItem[]>> {
+    return this.request<OperatorProductivityItem[]>('/analytics/operator-productivity', { method: 'GET' });
+  }
+
+  // -----------------------------------------------------------------------------------------------
+  // TICKET REOPEN WORKFLOW
+  // -----------------------------------------------------------------------------------------------
+
+  async requestTicketReopen(ticketId: string, reason: string): Promise<ApiResponse<any>> {
+    return this.request(`/tickets/${encodeURIComponent(ticketId)}/request-reopen`, {
+      method: 'POST',
+      body: JSON.stringify({ reason })
+    });
+  }
+
+  async reviewTicketReopen(
+    ticketId: string, 
+    action: 'APPROVE' | 'REJECT', 
+    note?: string
+  ): Promise<ApiResponse<any>> {
+    return this.request(`/tickets/${encodeURIComponent(ticketId)}/reopen-review`, {
+      method: 'POST',
+      body: JSON.stringify({ action, note })
+    });
+  }
+
+  async getTicketReopenRequests(ticketId: string): Promise<ApiResponse<TicketReopenRequest[]>> {
+    return this.request<TicketReopenRequest[]>(`/tickets/${encodeURIComponent(ticketId)}/reopen-requests`, {
+      method: 'GET'
+    });
   }
 }
 

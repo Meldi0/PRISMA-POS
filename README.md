@@ -1,7 +1,7 @@
 # PRISMA POS — Pos Resolution & Integrated Service Management Application
 
 > **Sistem Helpdesk & Manajemen Tiket Terpadu Kedinasan PT Pos Indonesia (Persero)**  
-> *Versi 3.2 — Enterprise Cloud Native, 3 Official Roles, Office Scope Isolation & Security Governance Release*
+> *Versi 2.5.0 — MFA OTP Email, Rekap Produktivitas Operator, Otomasi Regional, & Reopen Tiket Release*
 
 Aplikasi Helpdesk dan Manajemen Tiket Terpadu modern berbasis web yang dirancang khusus untuk lingkungan kerja **PT Pos Indonesia (Persero)**. Menghubungkan Kantor Pos Cabang (KCU/KC/KCP), Kantor Regional, dan Kantor Pusat Pengendalian Operasi dalam satu ekosistem terpadu berdesain elegan **Ocean Cyan Glassmorphism** yang sepenuhnya responsif di semua ukuran perangkat (desktop, tablet, dan smartphone).
 
@@ -31,8 +31,8 @@ Aplikasi Helpdesk dan Manajemen Tiket Terpadu modern berbasis web yang dirancang
 - Dukungan penyesuaian izin individual per pengguna (*User Permission Overrides*) terhadap 25+ permission katalog dengan efek `ALLOW`, `DENY`, atau `INHERIT` melalui laci interaktif `ManageAccessDrawer`.
 
 ### 6. Keamanan Enterprise & Log Audit Forensik
-- **Multi-Factor Authentication (MFA / 2FA TOTP)**: Otentikasi dua faktor berbasis aplikasi authenticator dengan kode darurat (*recovery codes*).
-- **Reset MFA oleh Admin**: Fitur pemulihan akun cepat bagi staf yang kehilangan akses authenticator.
+- **Multi-Factor Authentication (MFA — OTP Email)**: Setelah verifikasi password berhasil, sistem mengirimkan kode OTP 6 digit ke email terdaftar pengguna. Kode wajib dimasukkan sebelum dapat mengakses sistem.
+- **Reset MFA oleh Admin**: Fitur pemulihan akun cepat bagi staf yang kehilangan akses.
 - **Log Audit Forensik**: Seluruh aktivitas login, persetujuan staf, perubahan hak akses, dan manipulasi tiket tersimpan permanen di tabel `audit_logs`.
 
 ### 7. Workstation Triase Cerdas & Modul Arsip
@@ -43,10 +43,21 @@ Aplikasi Helpdesk dan Manajemen Tiket Terpadu modern berbasis web yang dirancang
 ### 8. Kompresi Foto Cerdas & Notifikasi Real-Time
 - **Auto-Kompresi Gambar di Klien**: Reduksi ukuran foto bukti kerusakan hingga 85% (~200KB) langsung di peramban pelapor sebelum dikirimkan ke server.
 - **Sistem Notifikasi Berlapis**: Nada denting harmonik Web Audio API tanpa latensi, push notification browser desktop, lonceng notifikasi, widget mengambang *Floating Chat Badge*, dan notifikasi email dinas via SMTP.
+### 9. Rekap Produktivitas Operator
+- **Dashboard Rekap per Atasan**: Tabel produktivitas tiket yang ditangani setiap operator (berdasarkan aksi nyata, bukan sekadar melihat tiket).
+- **Akses Terbatas**: Hanya Manager/Atasan (permission `operator.stats_view`) dapat mengakses laporan ini.
+- **Export CSV**: Data produktivitas dapat diunduh untuk keperluan pelaporan.
 
----
+### 10. Otomasi Data Regional & Kantor
+- **Tanpa Dropdown Manual**: Data Wilayah Regional dan Kantor Cabang otomatis terisi dari profil akun login.
+- **Read-Only Card**: Pelapor melihat kartu unit kerja yang tidak dapat diubah — mencegah kesalahan input dan manipulasi data.
 
-## Teknologi yang Digunakan
+### 11. Kunci Chat Tiket Tutup & Mekanisme Buka Kembali
+- **Chat Dinonaktifkan**: Setelah tiket berstatus Closed, kolom percakapan pelapor terkunci.
+- **Ajukan Buka Kembali**: Pelapor dapat mengajukan permohonan buka kembali tiket disertai alasan.
+- **Review Operator**: Operator UPT meninjau permohonan dan memutuskan Setujui (tiket aktif kembali) atau Tolak (tiket tetap tertutup).
+
+
 
 - **Frontend**: React 18.3, TypeScript 5.7, Vite 6.1, Tailwind CSS v3.4, Framer Motion v11, Lucide React Icons
 - **Backend API**: Node.js, Express 5.x RESTful API, Vercel Serverless Functions
@@ -121,7 +132,7 @@ Akses aplikasi melalui peramban: `http://localhost:3000` (atau port yang ditentu
 | **UPT_LUAR** | `budi.regional3@poso.local` | `Poso123!` | OFFICE | Kantor Regional 3 Jabar & Banten |
 | **UPT_LUAR (Pending)** | `hendra.pending@poso.local` | `Poso123!` | OFFICE | KC Cimahi (Menunggu Approval) |
 
-*Daftar lengkap akun dan rincian hak akses tercatat pada berkas [AKUN_DEMO_LOGIN.txt](file:///c:/Users/Asus/Documents/POSIND/POSO/AKUN_DEMO_LOGIN.txt).*
+*Catatan: Semua akun demo memerlukan MFA OTP saat login. Gunakan kode `123456` sebagai fallback testing jika SMTP tidak tersedia.*
 
 ---
 
@@ -136,6 +147,7 @@ Untuk informasi lebih mendalam, silakan merujuk pada dokumen-dokumen resmi proye
 | [POSO_PRD.md](file:///c:/Users/Asus/Documents/POSIND/POSO/POSO_PRD.md) | Product Requirements Document, spesifikasi 12 tabel database, & katalog API |
 | [DEPLOYMENT.md](file:///c:/Users/Asus/Documents/POSIND/POSO/DEPLOYMENT.md) | Panduan deployment serverless Vercel, Aiven MySQL, & konfigurasi produksi |
 | [PANDUAN_PENGGUNAAN.md](file:///c:/Users/Asus/Documents/POSIND/POSO/PANDUAN_PENGGUNAAN.md) | Panduan operasional workstation helpdesk untuk masing-masing peran pengguna |
+| [CATATAN_PERUBAHAN_FITUR.md](./CATATAN_PERUBAHAN_FITUR.md) | Catatan perubahan fitur v2.5.0: MFA OTP, rekap produktivitas, otomasi regional, reopen tiket |
 
 ---
 

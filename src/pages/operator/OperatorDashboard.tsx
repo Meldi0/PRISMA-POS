@@ -37,6 +37,7 @@ import { AuditLogView } from '../../components/admin/AuditLogView';
 import { DataSourceConfig } from '../../components/admin/DataSourceConfig';
 import { CommandPalette } from '../../components/features/CommandPalette';
 import { OperatorTicketModal } from '../../components/operator/OperatorTicketModal';
+import { OperatorProductivityTable } from '../../components/operator/OperatorProductivityTable';
 import { useToast } from '../../context/ToastContext';
 import { soundService } from '../../utils/sound';
 import { realtimeService } from '../../services/realtime';
@@ -192,6 +193,11 @@ export const OperatorDashboard: React.FC = () => {
         prevTicketCountRef.current = newTickets.length;
         isInitialTicketLoadRef.current = false;
         setTickets(newTickets);
+        setSelectedTicket((prev) => {
+          if (!prev) return null;
+          const found = newTickets.find((t: Ticket) => t.ticket_id === prev.ticket_id);
+          return found ? { ...prev, ...found } : prev;
+        });
       }
     } catch (err: any) {
       if (!silent) {
@@ -564,35 +570,41 @@ export const OperatorDashboard: React.FC = () => {
             )}
 
             {activeView === 'reports' && (
-              <div className="bg-white rounded-[16px] border border-[#E2E8F0]/80 p-6 shadow-sm space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-[10px] bg-[#EAF4F8] flex items-center justify-center text-[#0D5C75]">
-                    <BarChart3 size={20} />
+              <div className="space-y-6">
+                {/* SLA Compliance Summary */}
+                <div className="bg-white rounded-[16px] border border-[#E2E8F0]/80 p-6 shadow-sm space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-[10px] bg-[#EAF4F8] flex items-center justify-center text-[#0D5C75]">
+                      <BarChart3 size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-[16px] font-bold text-[#0F172A]">Laporan Kepatuhan SLA & Ringkasan Kinerja</h3>
+                      <p className="text-[12px] text-[#64748B]">Rekapitulasi beban kerja dan waktu penyelesaian tiket nasional</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-[16px] font-bold text-[#0F172A]">Laporan Kepatuhan SLA & Kinerja</h3>
-                    <p className="text-[12px] text-[#64748B]">Rekapitulasi beban kerja dan waktu penyelesaian tiket</p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+                    <div className="p-4 rounded-[12px] bg-[#F8FAFC] border border-[#E2E8F0] space-y-1">
+                      <span className="text-[11px] font-bold text-[#64748B] uppercase">Tingkat Resolusi</span>
+                      <p className="text-[24px] font-bold text-[#10B981]">
+                        {stats.total > 0 ? Math.round(((stats.closed + stats.archived) / stats.total) * 100) : 100}%
+                      </p>
+                    </div>
+
+                    <div className="p-4 rounded-[12px] bg-[#F8FAFC] border border-[#E2E8F0] space-y-1">
+                      <span className="text-[11px] font-bold text-[#64748B] uppercase">Rata-Rata Respons</span>
+                      <p className="text-[24px] font-bold text-[#0D5C75]">≤ 1.8 Jam</p>
+                    </div>
+
+                    <div className="p-4 rounded-[12px] bg-[#F8FAFC] border border-[#E2E8F0] space-y-1">
+                      <span className="text-[11px] font-bold text-[#64748B] uppercase">Tiket Lewat SLA</span>
+                      <p className="text-[24px] font-bold text-[#059669]">0 Tiket</p>
+                    </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-                  <div className="p-4 rounded-[12px] bg-[#F8FAFC] border border-[#E2E8F0] space-y-1">
-                    <span className="text-[11px] font-bold text-[#64748B] uppercase">Tingkat Resolusi</span>
-                    <p className="text-[24px] font-bold text-[#10B981]">
-                      {stats.total > 0 ? Math.round(((stats.closed + stats.archived) / stats.total) * 100) : 100}%
-                    </p>
-                  </div>
-
-                  <div className="p-4 rounded-[12px] bg-[#F8FAFC] border border-[#E2E8F0] space-y-1">
-                    <span className="text-[11px] font-bold text-[#64748B] uppercase">Rata-Rata Respons</span>
-                    <p className="text-[24px] font-bold text-[#0D5C75]">≤ 1.8 Jam</p>
-                  </div>
-
-                  <div className="p-4 rounded-[12px] bg-[#F8FAFC] border border-[#E2E8F0] space-y-1">
-                    <span className="text-[11px] font-bold text-[#64748B] uppercase">Tiket Lewat SLA</span>
-                    <p className="text-[24px] font-bold text-[#059669]">0 Tiket</p>
-                  </div>
-                </div>
+                {/* Operator Activity Recap Table (Khusus Atasan / Manager) */}
+                <OperatorProductivityTable />
               </div>
             )}
           </div>

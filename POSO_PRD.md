@@ -1,8 +1,8 @@
 # Product Requirements Document (PRD)
-## Aplikasi: PRISMA POS — Pos Resolution & Integrated Service Management Application (v3.2)
+## Aplikasi: PRISMA POS — Pos Resolution & Integrated Service Management Application (v2.5.0)
 ### Sistem Helpdesk & Manajemen Tiket Terpadu PT Pos Indonesia (Persero)
 
-**Versi:** 3.2 (Enterprise Architecture — Aiven for MySQL, 3 Official Roles, Office Scope, Granular RBAC & Forensic Audit)  
+**Versi:** 2.5.0 (MFA OTP Email, Rekap Produktivitas Operator, Otomasi Regional, Kunci Chat & Reopen Tiket)  
 **Status:** Live & Production Ready  
 **Tipe Dokumen:** Product Requirements & Technical Specification Document  
 
@@ -21,9 +21,12 @@ Sistem ini dibangun dengan arsitektur modern **React 18 + TypeScript + Vite** pa
 3. **Isolasi Data Tingkat Kantor (*Office-Level Data Scoping*)**: Tiket yang diajukan oleh staf UPT Luar terikat pada `office_id` kantornya, sehingga staf di kantor cabang lain tidak dapat melihat tiket tersebut. Hanya staf di kantor yang sama serta petugas di Kantor Pusat yang memiliki visibilitas.
 4. **Alur Persetujuan Registrasi Staf Dinas**: Pendaftaran staf baru menghasilkan akun berstatus `PENDING` yang wajib disetujui (`APPROVED`) oleh Admin Pusat di panel `/admin/approvals` sebelum dapat digunakan untuk masuk ke sistem.
 5. **Matriks Hak Akses Granular**: Mesin otorisasi dinamis yang memadukan baseline peran (*Role Permissions*) dengan izin override perorangan (*User Permissions*) terhadap 25+ permission katalog.
-6. **Multi-Factor Authentication (MFA / 2FA TOTP)**: Otentikasi dua faktor berbasis waktu (Google Authenticator / standard TOTP) lengkap dengan kode darurat (*recovery codes*) dan fitur reset instan oleh Admin.
+6. **Multi-Factor Authentication (MFA — OTP Email)**: Setelah email & password terverifikasi, sistem mengirim kode OTP 6 digit ke email terdaftar pengguna. Kode wajib dimasukkan sebelum sesi login aktif.
 7. **Jejak Audit Forensik Sistem**: Pencatatan otomatis setiap aksi login, persetujuan pendaftar, override izin, perubahan status tiket, dan manipulasi data pengguna ke dalam tabel `audit_logs`.
 8. **Papan Triase Kanban Aktif & Modul Arsip Mandiri**: Pemisahan tegas antara tiket aktif (`open`, `in_progress`, `waiting`) di papan Kanban triase dan tiket selesai (`closed`) di modul Arsip berkecepatan tinggi.
+9. **Rekap Produktivitas Operator**: Dashboard statistik per operator yang menampilkan jumlah tiket ditangani, total aksi, dan tiket diselesaikan. Akses terbatas untuk Manager/Atasan (permission `operator.stats_view`).
+10. **Otomasi Data Regional & Kantor**: Data Wilayah Regional dan Kantor Cabang otomatis terisi dari profil akun login; tidak ada dropdown manual pada form pengajuan tiket.
+11. **Kunci Chat Tiket Tutup & Mekanisme Buka Kembali**: Chat pelapor dinonaktifkan saat tiket berstatus Closed. Pelapor dapat mengajukan permohonan buka kembali. Operator meninjau dan memutuskan (Setujui / Tolak).
 
 ---
 
@@ -72,7 +75,8 @@ Sistem ini dibangun dengan arsitektur modern **React 18 + TypeScript + Vite** pa
 
 ### 4.1 Portal Pelapor & Staf Kantor Cabang (`/submit`, `/track`, `/my-tickets`)
 1. **Formulir Pengajuan Tiket Mandiri (`/submit`)**:
-   - Pemilihan Wilayah Regional (`regions`) dan Kantor Penempatan (`offices`) pelapor secara relasional.
+   - Data Wilayah Regional dan Kantor Penempatan **otomatis terdeteksi dari profil akun login** (`region_id` & `office_id`). Tidak ada dropdown manual yang perlu diisi pelapor.
+   - Kartu read-only "Unit Kerja Anda" menampilkan nama wilayah dan kantor secara otomatis.
    - Penentuan otomatis unit penugasan UPT teknis berdasarkan kategori layanan yang dipilih.
    - **Live Ticket Preview Card**: Kartu simulasi real-time di sisi kanan formulir yang memperlihatkan tampilan tiket sebelum dikirimkan.
    - **Client-Side Canvas Image Compression**: Mengompresi foto bukti fisik resolusi tinggi langsung di peramban hingga 85% lebih kecil (~200KB) dengan preservasi rasio aspek (maks. 1600px, quality: 0.82, output: base64 data URL).
