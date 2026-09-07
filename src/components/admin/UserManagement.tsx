@@ -27,10 +27,18 @@ import {
   Lock,
   BadgeCheck,
   Briefcase,
+  Sliders,
+  Smartphone,
+  Ban,
+  RotateCcw,
+  Shield,
   X
 } from 'lucide-react';
-import { User, UserRole } from '../../types';
+import { User, UserRole, AccountStatus, DataScope } from '../../types';
 import { apiService } from '../../services/api';
+import { ManageAccessDrawer } from './ManageAccessDrawer';
+import { UserApprovalManagement } from './UserApprovalManagement';
+import { useToast } from '../../context/ToastContext';
 
 // =================================================================================================
 // KONSTANTA & MASTER DATA POS INDONESIA
@@ -46,17 +54,9 @@ const DEPARTMENT_OPTIONS = [
 ];
 
 const ROLE_HIERARCHY_OPTIONS = [
-  { value: 'pengguna_umum', label: 'User (Staf Umum)', badge: 'Staf Umum' },
-  { value: 'pengguna_umum', label: 'User Pusat', badge: 'User Pusat' },
-  { value: 'operator', label: 'Operator Helpdesk', badge: 'Operator' },
-  { value: 'operator', label: 'Admin Operator', badge: 'Admin Operator' },
-  { value: 'admin', label: 'Admin User', badge: 'Admin User' },
-  { value: 'upt', label: 'IT Support & Developer', badge: 'IT Support' },
-  { value: 'operator', label: 'Admin KC (Kantor Cabang)', badge: 'Admin KC' },
-  { value: 'operator', label: 'Admin KCU (Kantor Cabang Utama)', badge: 'Admin KCU' },
-  { value: 'admin', label: 'Admin Regional', badge: 'Admin Regional' },
-  { value: 'admin', label: 'Admin Pusat / Super Admin', badge: 'Super Admin' },
-  { value: 'pengguna_umum', label: 'Magang / Internship', badge: 'Internship' }
+  { value: 'UPT_LUAR' as UserRole, label: 'UPT Luar / Pelapor (Kantor Cabang / Regional)', badge: 'UPT LUAR' },
+  { value: 'PETUGAS_UPT' as UserRole, label: 'Petugas UPT Pusat (Helpdesk)', badge: 'PETUGAS UPT' },
+  { value: 'ADMIN' as UserRole, label: 'Admin (Super Administrator)', badge: 'ADMIN' }
 ];
 
 const REGIONAL_PRESETS: { [code: string]: string } = {
@@ -87,7 +87,7 @@ export const UserManagement: React.FC = () => {
   // Group 2: Otorisasi & Peran Dinas
   const [department, setDepartment] = useState(DEPARTMENT_OPTIONS[0]);
   const [nip, setNip] = useState('');
-  const [selectedRoleTitle, setSelectedRoleTitle] = useState(ROLE_HIERARCHY_OPTIONS[2].label); // Operator Helpdesk
+  const [selectedRoleTitle, setSelectedRoleTitle] = useState(ROLE_HIERARCHY_OPTIONS[0].label); // Pelapor Internal
 
   // Group 3: Foto Profil
   const [avatarPreview, setAvatarPreview] = useState<string>('');
@@ -120,12 +120,62 @@ export const UserManagement: React.FC = () => {
   // Detail View Drawer
   const [selectedDetailUser, setSelectedDetailUser] = useState<User | null>(null);
 
+  // Tab & Granular Access State
+  const [activeTab, setActiveTab] = useState<'users' | 'approvals'>('users');
+  const [pendingApprovalCount, setPendingApprovalCount] = useState<number>(0);
+  const [accessDrawerUser, setAccessDrawerUser] = useState<User | null>(null);
+  const { success: toastSuccess, error: toastError } = useToast();
+
+  const handleResetMfa = async (targetUser: User) => {
+    if (!window.confirm(`Reset Multi-Factor Authentication (MFA) untuk pengguna "${targetUser.name}"? Pengguna akan diminta mendaftarkan ulang Authenticator saat login berikutnya.`)) {
+      return;
+    }
+    try {
+      const res = await apiService.resetUserMfa(targetUser.user_id);
+      if (res.status === 'success') {
+        toastSuccess(`MFA untuk ${targetUser.name} berhasil di-reset.`);
+        await fetchUsers();
+      } else {
+        toastError(res.message || 'Gagal mereset MFA.');
+      }
+    } catch (err: any) {
+      toastError(err.message || 'Terjadi kesalahan sistem.');
+    }
+  };
+
+  const handleToggleSuspend = async (targetUser: User) => {
+    const isSuspended = targetUser.account_status === 'SUSPENDED';
+    const actionText = isSuspended ? 'mengaktifkan kembali' : 'menonaktifkan (suspend)';
+    if (!window.confirm(`Apakah Anda yakin ingin ${actionText} akun "${targetUser.name}"?`)) {
+      return;
+    }
+    try {
+      const res = isSuspended 
+        ? await apiService.activateUser(targetUser.user_id) 
+        : await apiService.suspendUser(targetUser.user_id);
+      if (res.status === 'success') {
+        toastSuccess(`Akun "${targetUser.name}" berhasil di-${isSuspended ? 'aktifkan' : 'suspend'}.`);
+        await fetchUsers();
+      } else {
+        toastError(res.message || 'Gagal mengubah status akun.');
+      }
+    } catch (err: any) {
+      toastError(err.message || 'Terjadi kesalahan sistem.');
+    }
+  };
+
   const fetchUsers = async () => {
     setIsLoading(true);
     try {
-      const res = await apiService.getUsers();
+      const [res, appRes] = await Promise.all([
+        apiService.getUsers(),
+        apiService.getApprovals({ status: 'PENDING' })
+      ]);
       if (res.status === 'success' && res.data) {
         setUsers(res.data);
+      }
+      if (appRes.status === 'success' && appRes.data) {
+        setPendingApprovalCount(appRes.data.length);
       }
     } finally {
       setIsLoading(false);
@@ -176,7 +226,7 @@ export const UserManagement: React.FC = () => {
     setShowPassword(false);
     setDepartment(DEPARTMENT_OPTIONS[0]);
     setNip('');
-    setSelectedRoleTitle(ROLE_HIERARCHY_OPTIONS[2].label);
+    setSelectedRoleTitle(ROLE_HIERARCHY_OPTIONS[0].label);
     setAvatarPreview('');
     setJabatanFungsional('');
     setKantorPenempatan('');
@@ -200,19 +250,8 @@ export const UserManagement: React.FC = () => {
 
     // Determine system role mapping
     const matchedRoleObj = ROLE_HIERARCHY_OPTIONS.find(r => r.label === selectedRoleTitle);
-    const systemRole: UserRole = (matchedRoleObj?.value as UserRole) || 'operator';
-
-    // Map UPT unit if technical role
-    let assignedUpt = undefined;
-    if (department.includes('IT') || selectedRoleTitle.includes('IT')) {
-      assignedUpt = 'UPT TI & Jaringan';
-    } else if (department.includes('CGS') || department.includes('Fasilitas')) {
-      assignedUpt = 'UPT Sarana & Prasarana';
-    } else if (department.includes('Operasi')) {
-      assignedUpt = 'UPT Hardware & Workshop';
-    } else {
-      assignedUpt = 'Helpdesk Pusat & Layanan Terpadu';
-    }
+    const systemRole: UserRole = (matchedRoleObj?.value as UserRole) || 'UPT_LUAR';
+    const assignedScope: DataScope = (systemRole === 'ADMIN' || systemRole === 'PETUGAS_UPT' || systemRole === 'ADMIN_PUSAT' || systemRole === 'OPERATOR') ? 'GLOBAL' : 'OFFICE';
 
     setIsSubmitting(true);
     setStatusMsg(null);
@@ -223,7 +262,7 @@ export const UserManagement: React.FC = () => {
         email: email.trim().toLowerCase(),
         password: password.trim(),
         role: systemRole,
-        upt_unit: systemRole === 'upt' ? assignedUpt : undefined,
+        data_scope: assignedScope,
         nip: nip.trim() || `POS-${Date.now().toString().slice(-4)}`,
         department,
         role_title: selectedRoleTitle,
@@ -328,7 +367,6 @@ export const UserManagement: React.FC = () => {
       const res = await apiService.updateUserRole({
         target_user_id: resetUser.user_id,
         new_role: resetUser.role,
-        new_upt_unit: resetUser.upt_unit,
         reset_password: resetPasswordVal.trim()
       });
 
@@ -358,7 +396,7 @@ export const UserManagement: React.FC = () => {
       (u.nip && u.nip.toLowerCase().includes(q)) ||
       (u.department && u.department.toLowerCase().includes(q)) ||
       (u.role_title && u.role_title.toLowerCase().includes(q)) ||
-      (u.kantor_penempatan && u.kantor_penempatan.toLowerCase().includes(q));
+      (u.office_name && u.office_name.toLowerCase().includes(q));
 
     const matchesDept = departmentFilter === 'ALL' || u.department === departmentFilter;
 
@@ -377,12 +415,50 @@ export const UserManagement: React.FC = () => {
         className="hidden"
       />
 
-      {/* HEADER SECTION */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-[#E2E8F0] shadow-xs">
-        <div>
-          <h2 className="text-xl font-bold text-[#0F172A] tracking-tight">Manajemen Pengguna & Staf Teknis</h2>
-          <p className="text-xs text-[#64748B] mt-0.5 font-medium">Kelola data kepegawaian dinas, otorisasi peran, penempatan wilayah, dan kredensial akses PRISMA POS</p>
-        </div>
+      {/* TOP TAB SWITCHER: USERS & PERMISSIONS vs PERSESETUJUAN REGISTRASI */}
+      <div className="flex items-center gap-2 p-1.5 bg-slate-200/70 rounded-2xl w-fit">
+        <button
+          type="button"
+          onClick={() => setActiveTab('users')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+            activeTab === 'users'
+              ? 'bg-white text-[#002B49] shadow-xs'
+              : 'text-[#64748B] hover:text-[#0F172A]'
+          }`}
+        >
+          <Users size={15} />
+          <span>Pengguna & Hak Akses</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('approvals')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+            activeTab === 'approvals'
+              ? 'bg-white text-[#002B49] shadow-xs'
+              : 'text-[#64748B] hover:text-[#0F172A]'
+          }`}
+        >
+          <UserCheck size={15} />
+          <span>Persetujuan Registrasi Dinas</span>
+          {pendingApprovalCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-extrabold animate-pulse">
+              {pendingApprovalCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeTab === 'approvals' ? (
+        <UserApprovalManagement onApprovedCountChange={setPendingApprovalCount} />
+      ) : (
+        <>
+          {/* HEADER SECTION */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-[#E2E8F0] shadow-xs">
+            <div>
+              <h2 className="text-xl font-bold text-[#0F172A] tracking-tight">Manajemen Pengguna & Staf Teknis</h2>
+              <p className="text-xs text-[#64748B] mt-0.5 font-medium">Kelola data kepegawaian dinas, otorisasi peran, penempatan wilayah, dan kredensial akses PRISMA POS</p>
+            </div>
 
         <div className="flex items-center gap-2.5">
           <button
@@ -838,11 +914,11 @@ export const UserManagement: React.FC = () => {
           <thead className="bg-[#F8FAFC] border-b border-[#E2E8F0] text-slate-700 font-bold text-[11px] uppercase tracking-wider">
             <tr>
               <th className="py-3.5 px-4">Petugas / Staf</th>
-              <th className="py-3.5 px-4">Kontak & NIP</th>
-              <th className="py-3.5 px-4">Department & Jabatan</th>
-              <th className="py-3.5 px-4">Peran Akses</th>
+              <th className="py-3.5 px-4">Wilayah & Scope</th>
+              <th className="py-3.5 px-4">Peran & Status</th>
+              <th className="py-3.5 px-4 text-center">MFA</th>
               <th className="py-3.5 px-4">Kata Sandi</th>
-              <th className="py-3.5 px-4 text-center">Aksi</th>
+              <th className="py-3.5 px-4 text-right">Aksi & Akses</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -864,6 +940,7 @@ export const UserManagement: React.FC = () => {
                 const isSuperAdmin = u.email === 'admin@poso.local' || (u.role === 'admin' && u.user_id === 'USR-ADMIN01');
                 const isPassVisible = visiblePasswords[u.user_id] || false;
                 const displayPass = u.password_plain;
+                const isSuspended = u.account_status === 'SUSPENDED';
 
                 return (
                   <tr key={u.user_id} className="hover:bg-slate-50/80 transition-colors">
@@ -871,52 +948,85 @@ export const UserManagement: React.FC = () => {
                     <td className="py-3.5 px-4">
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0 font-bold text-xs text-[#002B49] overflow-hidden">
-                          {u.avatar_url ? (
-                            <img src={u.avatar_url} alt={u.name} className="w-full h-full object-cover" />
-                          ) : (
-                            u.name.charAt(0).toUpperCase()
-                          )}
+                          {u.name.charAt(0).toUpperCase()}
                         </div>
                         <div>
                           <div className="font-bold text-slate-900 leading-snug">{u.name}</div>
+                          <div className="text-[11px] text-[#0D5C75] font-medium">{u.email}</div>
                           <div className="text-[10px] font-mono text-[#64748B]">ID: {u.user_id}</div>
                         </div>
                       </div>
                     </td>
 
-                    {/* Contact & NIP */}
-                    <td className="py-3.5 px-4 space-y-0.5">
-                      <div className="font-medium text-slate-700">{u.email}</div>
-                      <div className="text-[11px] text-[#64748B] flex items-center gap-2">
-                        {u.nip && <span>NIP: <strong className="font-mono text-slate-800">{u.nip}</strong></span>}
-                        {u.phone_number && <span>• {u.phone_number}</span>}
+                    {/* Wilayah & Data Scope */}
+                    <td className="py-3.5 px-4 space-y-1">
+                      <div className="font-semibold text-slate-800">
+                        {u.region_name || (u.data_scope === 'GLOBAL' ? 'Pusat / Seluruh Indonesia' : 'Regional Belum Disetel')}
+                      </div>
+                      <div className="text-[11px] text-[#64748B]">
+                        {u.office_name || (u.data_scope === 'REGIONAL' ? 'Kantor Regional' : '-')}
+                      </div>
+                      <span className={`inline-flex items-center font-mono font-bold text-[9px] px-2 py-0.5 rounded ${
+                        u.data_scope === 'GLOBAL' 
+                          ? 'bg-purple-100 text-purple-800'
+                          : u.data_scope === 'REGIONAL'
+                            ? 'bg-blue-100 text-blue-800'
+                            : u.data_scope === 'OFFICE'
+                              ? 'bg-cyan-100 text-cyan-800'
+                              : 'bg-slate-100 text-slate-700'
+                      }`}>
+                        SCOPE: {u.data_scope || 'OWN'}
+                      </span>
+                    </td>
+
+                    {/* Peran & Status */}
+                    <td className="py-3.5 px-4 space-y-1">
+                      <div>
+                        <span className={`inline-flex items-center gap-1 font-bold px-2.5 py-0.5 rounded-md text-[10px] ${
+                          u.role === 'ADMIN' || u.role === 'ADMIN_PUSAT' || u.role === 'admin'
+                            ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                            : u.role === 'PETUGAS_UPT' || u.role === 'OPERATOR' || u.role === 'operator' || u.role === 'upt'
+                              ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        }`}>
+                          <Shield size={10} />
+                          <span>{u.role === 'UPT_LUAR' ? 'UPT Luar' : u.role === 'PETUGAS_UPT' ? 'Petugas UPT Pusat' : u.role === 'ADMIN' ? 'Admin' : u.role}</span>
+                        </span>
+                      </div>
+                      <div>
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                          u.account_status === 'ACTIVE'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : u.account_status === 'PENDING'
+                              ? 'bg-amber-100 text-amber-800'
+                              : u.account_status === 'SUSPENDED'
+                                ? 'bg-orange-100 text-orange-800'
+                                : 'bg-rose-100 text-rose-800'
+                        }`}>
+                          {u.account_status || 'ACTIVE'}
+                        </span>
                       </div>
                     </td>
 
-                    {/* Department & Jabatan */}
-                    <td className="py-3.5 px-4 space-y-0.5">
-                      <div className="font-semibold text-[#002B49]">{u.department || 'Pengendalian Operasi'}</div>
-                      <div className="text-[11px] text-[#64748B]">{u.jabatan_fungsional || u.kantor_penempatan || 'Kantor Pusat'}</div>
-                    </td>
-
-                    {/* Role Badge / Selector */}
-                    <td className="py-3.5 px-4">
-                      {isSuperAdmin ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black bg-rose-50 text-rose-700 border border-rose-200">
-                          <ShieldAlert className="w-3 h-3" />
-                          SUPER ADMIN
-                        </span>
+                    {/* MFA Status */}
+                    <td className="py-3.5 px-4 text-center">
+                      {u.mfa_enabled ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            <Smartphone size={10} /> MFA Aktif
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleResetMfa(u)}
+                            className="text-[9px] font-bold text-[#0D5C75] hover:underline cursor-pointer flex items-center gap-0.5"
+                            title="Reset MFA pengguna ini"
+                          >
+                            <RotateCcw size={9} />
+                            <span>Reset</span>
+                          </button>
+                        </div>
                       ) : (
-                        <select
-                          value={u.role}
-                          onChange={(e) => handleChangeRole(u.user_id, e.target.value as UserRole, u.upt_unit)}
-                          className="px-2.5 py-1 rounded-lg bg-[#F8FAFC] hover:bg-white border border-[#E2E8F0] text-xs font-bold text-slate-800 focus:outline-none focus:border-[#002B49] cursor-pointer"
-                        >
-                          <option value="operator">OPERATOR</option>
-                          <option value="upt">UPT TEKNISI</option>
-                          <option value="admin">ADMIN</option>
-                          <option value="pengguna_umum">PELAPOR</option>
-                        </select>
+                        <span className="text-[10px] text-slate-400 font-medium">Nonaktif</span>
                       )}
                     </td>
 
@@ -946,7 +1056,7 @@ export const UserManagement: React.FC = () => {
                             </button>
                           </div>
                         ) : (
-                          <div className="inline-flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 font-medium" title="Kata sandi tersimpan aman dalam format hash terenkripsi bcrypt / SHA-256 di database Aiven MySQL">
+                          <div className="inline-flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-md border border-slate-200 text-[10px] text-slate-500 font-medium" title="Terenkripsi di database MySQL">
                             <Lock className="w-3 h-3 text-slate-400" />
                             <span>Terenkripsi</span>
                           </div>
@@ -963,22 +1073,48 @@ export const UserManagement: React.FC = () => {
                       </div>
                     </td>
 
-                    {/* Actions */}
-                    <td className="py-3.5 px-4 text-center">
-                      {isSuperAdmin ? (
-                        <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
-                          Dilindungi
-                        </span>
-                      ) : (
+                    {/* Actions & Manage Access */}
+                    <td className="py-3.5 px-4 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {/* Manage Access Button */}
                         <button
                           type="button"
-                          onClick={() => handleDeleteUser(u)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                          title="Hapus Akun Pengguna"
+                          onClick={() => setAccessDrawerUser(u)}
+                          className="px-2.5 py-1.5 rounded-lg bg-[#0D5C75] hover:bg-[#083342] text-white font-bold text-[11px] flex items-center gap-1 shadow-xs transition-all cursor-pointer"
+                          title="Konfigurasi Role, Data Scope & 24 Izin Granular"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Sliders size={12} />
+                          <span>Akses</span>
                         </button>
-                      )}
+
+                        {/* Suspend / Activate Button */}
+                        {!isSuperAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSuspend(u)}
+                            className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                              isSuspended
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-orange-50 hover:text-orange-700 hover:border-orange-200'
+                            }`}
+                            title={isSuspended ? 'Aktifkan Akun' : 'Suspend / Nonaktifkan Akun'}
+                          >
+                            <Ban size={13} />
+                          </button>
+                        )}
+
+                        {/* Delete User */}
+                        {!isSuperAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteUser(u)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                            title="Hapus Akun Pengguna"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1049,6 +1185,18 @@ export const UserManagement: React.FC = () => {
         </div>
       )}
 
+      {/* MANAGE ACCESS & GRANULAR PERMISSIONS DRAWER */}
+      <ManageAccessDrawer
+        user={accessDrawerUser}
+        isOpen={Boolean(accessDrawerUser)}
+        onClose={() => setAccessDrawerUser(null)}
+        onSuccess={() => fetchUsers()}
+      />
+        </>
+      )}
+
     </div>
   );
 };
+
+export default UserManagement;

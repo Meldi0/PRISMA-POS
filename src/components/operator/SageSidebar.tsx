@@ -13,12 +13,27 @@ import {
   Search,
   Compass,
   X,
-  Archive
+  Archive,
+  UserCheck,
+  ShieldAlert,
+  Shield
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { apiService } from '../../services/api';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export type DashboardViewType = 'tickets' | 'archive' | 'track' | 'users' | 'datasource' | 'settings' | 'reports' | 'kanban' | 'table';
+export type DashboardViewType = 
+  | 'tickets' 
+  | 'archive' 
+  | 'track' 
+  | 'users' 
+  | 'approvals' 
+  | 'audit_log' 
+  | 'datasource' 
+  | 'settings' 
+  | 'reports' 
+  | 'kanban' 
+  | 'table';
 
 interface SageSidebarProps {
   collapsed: boolean;
@@ -47,8 +62,19 @@ export const SageSidebar: React.FC<SageSidebarProps> = ({
   mobileOpen = false,
   onMobileClose
 }) => {
-  const { user, logout } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const { user, logout, hasPermission } = useAuth();
+  const [pendingApprovals, setPendingApprovals] = React.useState<number>(0);
+
+  // Poll pending approvals if user has approve permission
+  React.useEffect(() => {
+    if (hasPermission('user.approve')) {
+      apiService.getApprovals({ status: 'PENDING' }).then(res => {
+        if (res.status === 'success' && res.data) {
+          setPendingApprovals(res.data.length);
+        }
+      }).catch(() => {});
+    }
+  }, [hasPermission]);
 
   const getInitials = (name?: string) => {
     if (!name) return 'OP';
@@ -57,35 +83,82 @@ export const SageSidebar: React.FC<SageSidebarProps> = ({
     return name.slice(0, 2).toUpperCase();
   };
 
+  const getRoleLabel = (r?: string) => {
+    switch (r) {
+      case 'ADMIN':
+      case 'ADMIN_PUSAT':
+      case 'admin':
+        return 'Admin';
+      case 'PETUGAS_UPT':
+      case 'OPERATOR':
+      case 'operator':
+      case 'upt':
+        return 'Petugas UPT Pusat';
+      case 'UPT_LUAR':
+      case 'PELAPOR':
+      case 'USER_REGIONAL':
+      case 'USER_CABANG':
+      case 'pengguna_umum':
+        return 'UPT Luar';
+      default:
+        return 'UPT Luar';
+    }
+  };
+
+  const isPelapor = user?.role === 'UPT_LUAR' || user?.role === 'PELAPOR' || user?.role === 'pengguna_umum' || user?.role === 'USER_CABANG' || user?.role === 'USER_REGIONAL';
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'ADMIN_PUSAT' || user?.role === 'admin';
+  const canViewTickets = hasPermission('ticket.view') || hasPermission('ticket.view_own') || hasPermission('ticket.view_all');
+
   const navItems = [
-    { 
-      id: 'tickets' as DashboardViewType, 
-      icon: ListFilter, 
-      label: 'Semua Tiket',
-      badge: ticketCounts ? (ticketCounts.active ?? (ticketCounts.open + ticketCounts.in_progress + ticketCounts.waiting)) : undefined 
-    },
-    { 
-      id: 'archive' as DashboardViewType, 
-      icon: Archive, 
-      label: 'Arsip Tiket',
-      badge: ticketCounts ? (ticketCounts.archived ?? ticketCounts.closed) : undefined
-    },
-    { 
-      id: 'track' as DashboardViewType, 
-      icon: Compass, 
-      label: 'Lacak Tiket' 
-    },
-    { 
-      id: 'reports' as DashboardViewType, 
-      icon: BarChart3, 
-      label: 'Laporan & SLA' 
-    },
-    ...(isAdmin ? [
+    ...(canViewTickets ? [
+      { 
+        id: 'tickets' as DashboardViewType, 
+        icon: ListFilter, 
+        label: isPelapor ? 'Tiket Saya / Kantor' : 'Semua Tiket',
+        badge: ticketCounts ? (ticketCounts.active ?? (ticketCounts.open + ticketCounts.in_progress + ticketCounts.waiting)) : undefined 
+      },
+      { 
+        id: 'archive' as DashboardViewType, 
+        icon: Archive, 
+        label: isPelapor ? 'Riwayat Selesai' : 'Arsip Tiket',
+        badge: ticketCounts ? (ticketCounts.archived ?? ticketCounts.closed) : undefined
+      },
+      { 
+        id: 'track' as DashboardViewType, 
+        icon: Compass, 
+        label: 'Lacak Tiket' 
+      },
+    ] : []),
+    ...(hasPermission('monitoring.view') || hasPermission('analytics.view') ? [
+      { 
+        id: 'reports' as DashboardViewType, 
+        icon: BarChart3, 
+        label: 'Monitoring Tiket & SLA' 
+      },
+    ] : []),
+    ...(hasPermission('user.approve') || hasPermission('approval.view') || hasPermission('approval.manage') ? [
+      { 
+        id: 'approvals' as DashboardViewType, 
+        icon: UserCheck, 
+        label: 'Persetujuan Registrasi',
+        badge: pendingApprovals > 0 ? pendingApprovals : undefined
+      },
+    ] : []),
+    ...((hasPermission('user.view') && isAdmin) ? [
       { 
         id: 'users' as DashboardViewType, 
         icon: Users, 
-        label: 'Manajemen Staf' 
+        label: 'Manajemen Staf & Hak Akses' 
       },
+    ] : []),
+    ...(hasPermission('audit_log.view') || hasPermission('audit.view') ? [
+      { 
+        id: 'audit_log' as DashboardViewType, 
+        icon: Shield, 
+        label: 'Log Audit Keamanan' 
+      },
+    ] : []),
+    ...(isAdmin ? [
       { 
         id: 'datasource' as DashboardViewType, 
         icon: Database, 
@@ -172,8 +245,8 @@ export const SageSidebar: React.FC<SageSidebarProps> = ({
           {!collapsed && (
             <div className="flex-1 min-w-0 overflow-hidden">
               <p className="text-[13px] font-semibold text-white truncate">{user?.name || 'Ahmad Operator'}</p>
-              <p className="text-[11px] text-[#199FB1] truncate capitalize">
-                {user?.role === 'admin' ? 'Administrator' : user?.role === 'upt' ? 'Teknisi UPT' : 'Operator Dinas'}
+              <p className="text-[11px] text-[#38BDF8] truncate font-semibold">
+                {getRoleLabel(user?.role)} • <span className="font-mono text-[9px] text-[#BAE6FD]">{user?.data_scope || 'OFFICE'}</span>
               </p>
             </div>
           )}

@@ -8,8 +8,22 @@ export default defineConfig({
     open: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:5001',
-        changeOrigin: true
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('error', (_err, _req, res) => {
+            if (!res.headersSent) {
+              res.writeHead(503, {
+                'Content-Type': 'application/json; charset=utf-8'
+              });
+              res.end(JSON.stringify({
+                status: 'error',
+                code: 503,
+                message: 'Backend API PRISMA POS (port 5001) tidak merespons. Pastikan npm run server berjalan.'
+              }));
+            }
+          });
+        }
       }
     }
   }

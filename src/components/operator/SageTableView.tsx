@@ -3,7 +3,8 @@ import { Ticket, TicketStatus } from '../../types';
 import { StatusBadge, PriorityBadge } from '../ui/Badge';
 import { SlaCountdown } from '../features/SlaCountdown';
 import { parseTicketDetails } from '../../utils/ticketFormatter';
-import { Eye, ArrowUpDown, ChevronRight, Inbox, Archive, RotateCcw } from 'lucide-react';
+import { Eye, ArrowUpDown, ChevronRight, Inbox, Archive, RotateCcw, Building2, MapPin } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 interface SageTableViewProps {
   tickets: Ticket[];
@@ -16,6 +17,21 @@ export const SageTableView: React.FC<SageTableViewProps> = ({
   onTicketClick,
   onStatusChange
 }) => {
+  const { user, hasPermission } = useAuth();
+  const isPelapor = user?.role === 'UPT_LUAR' || user?.role === 'PELAPOR' || user?.role === 'pengguna_umum' || user?.role === 'USER_CABANG' || user?.role === 'USER_REGIONAL';
+  const canChangeStatus = !isPelapor && Boolean(
+    user?.role === 'ADMIN' || 
+    user?.role === 'PETUGAS_UPT' || 
+    user?.role === 'ADMIN_PUSAT' || 
+    user?.role === 'OPERATOR' ||
+    user?.role === 'admin' ||
+    user?.role === 'operator' ||
+    user?.role === 'upt' ||
+    hasPermission('ticket.change_status') ||
+    hasPermission('ticket.resolve') ||
+    hasPermission('ticket.close')
+  );
+
   const [sortField, setSortField] = useState<'ticket_id' | 'created_at' | 'priority'>('created_at');
   const [sortAsc, setSortAsc] = useState(false);
 
@@ -115,9 +131,23 @@ export const SageTableView: React.FC<SageTableViewProps> = ({
                       </p>
                     </td>
 
-                    <td className="px-4 py-3 min-w-[160px] max-w-[220px]">
+                    <td className="px-4 py-3 min-w-[170px] max-w-[240px]">
                       <p className="font-semibold text-[#0F172A] truncate">{ticket.requester_name || 'Pelapor'}</p>
-                      <p className="text-[11px] text-[#64748B] truncate mt-0.5">{parsed.location || 'Unit Kantor'}</p>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        {ticket.office_name && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#F1F5F9] text-[#0D5C75] border border-[#CBD5E1]/60">
+                            <Building2 size={10} className="text-[#0D5C75] shrink-0" />
+                            <span>{ticket.office_name.replace(' 40000', '').replace(' 16000', '').replace(' 40500', '')}</span>
+                          </span>
+                        )}
+                        {(ticket.region_code || ticket.region_name) && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#EAF4F8] text-[#199FB1] border border-[#199FB1]/30">
+                            <MapPin size={10} className="text-[#199FB1] shrink-0" />
+                            <span>{ticket.region_code || ticket.region_id}</span>
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-[#94A3B8] truncate mt-0.5">{parsed.location || 'Unit Kantor'}</p>
                     </td>
 
                     <td className="px-4 py-3 whitespace-nowrap">
@@ -134,7 +164,7 @@ export const SageTableView: React.FC<SageTableViewProps> = ({
 
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1.5">
-                        {ticket.status === 'closed' && onStatusChange && (
+                        {ticket.status === 'closed' && canChangeStatus && onStatusChange && (
                           <button
                             type="button"
                             onClick={(e) => {

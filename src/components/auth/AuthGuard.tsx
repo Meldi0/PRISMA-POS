@@ -5,13 +5,15 @@ import { useAuth } from '../../context/AuthContext';
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requireStaff?: boolean;
+  requiredPermission?: string;
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ 
   children, 
-  requireStaff = false 
+  requireStaff = false,
+  requiredPermission
 }) => {
-  const { isAuthenticated, isStaff, isLoading } = useAuth();
+  const { isAuthenticated, isStaff, isLoading, hasPermission } = useAuth();
   const location = useLocation();
 
   if (isLoading) {
@@ -30,6 +32,10 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   if (requireStaff && !isStaff) {
     // Public users trying to access operator dashboard are redirected to their ticket portal
     return <Navigate to="/my-tickets" replace />;
+  }
+
+  if (requiredPermission && !hasPermission(requiredPermission)) {
+    return <Navigate to="/access-denied" replace />;
   }
 
   return <>{children}</>;

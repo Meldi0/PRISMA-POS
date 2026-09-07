@@ -108,7 +108,7 @@ export const FloatingChatBadge: React.FC<FloatingChatBadgeProps> = ({ onOpenTick
             {/* Message Snippet */}
             {(() => {
               const parsed = parseThreadMessage(activePopup.message);
-              const displaySnippet = parsed.cleanText || (parsed.attachments.length > 0 ? `📷 Mengirimkan ${parsed.attachments.length} foto/lampiran berkas` : activePopup.message);
+              const displaySnippet = parsed.cleanText || (parsed.attachments.length > 0 ? `Mengirimkan ${parsed.attachments.length} berkas/lampiran` : activePopup.message);
               return (
                 <p className="text-[12px] text-[#334155] font-medium leading-relaxed my-2.5 line-clamp-2 bg-[#F8FAFC] p-2.5 rounded-xl border border-[#F1F5F9]">
                   "{displaySnippet}"

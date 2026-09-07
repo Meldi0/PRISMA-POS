@@ -1,8 +1,9 @@
 import express from 'express';
-import { authenticate, requireAuth, requireRole } from '../middleware/authMiddleware.js';
+import { authenticate, requireAuth, requireRole, requirePermission } from '../middleware/authMiddleware.js';
 import * as authController from '../controllers/authController.js';
 import * as ticketController from '../controllers/ticketController.js';
 import * as userController from '../controllers/userController.js';
+import * as approvalController from '../controllers/approvalController.js';
 import * as analyticsController from '../controllers/analyticsController.js';
 import { pool } from '../config/db.js';
 
@@ -35,41 +36,68 @@ router.get('/health', async (req, res) => {
 });
 
 // -------------------------------------------------------------------------------------------------
-// 2. AUTHENTICATION
+// 2. MASTER DATA ORGANISASI & ROLES
 // -------------------------------------------------------------------------------------------------
-router.post('/auth/login', authController.login);
-router.post('/auth/register', authController.register);
-router.get('/auth/me', requireAuth, authController.getProfile);
+router.get('/regions', userController.getRegions);
+router.get('/offices', userController.getOffices);
+router.get('/roles', userController.getRoles);
 
 // -------------------------------------------------------------------------------------------------
-// 3. TICKETS & THREADS
+// 3. AUTHENTICATION & MFA
+// -------------------------------------------------------------------------------------------------
+router.post('/auth/login', authController.login);
+router.post('/auth/mfa/verify', authController.verifyMfa);
+router.post('/auth/mfa/resend', authController.resendMfaOtp);
+router.post('/auth/register', authController.register);
+router.get('/auth/me', requireAuth, authController.getProfile);
+router.post('/auth/mfa/setup', requireAuth, authController.setupMfa);
+router.post('/auth/mfa/confirm', requireAuth, authController.confirmMfa);
+
+// -------------------------------------------------------------------------------------------------
+// 4. TICKETS & THREADS
 // -------------------------------------------------------------------------------------------------
 router.get('/tickets', ticketController.getTickets);
 router.post('/tickets', ticketController.createTicket);
 router.get('/tickets/track/:id', ticketController.trackTicket);
 router.get('/tickets/:id', ticketController.getTicketDetail);
-router.patch('/tickets/:id/status', requireAuth, ticketController.updateTicketStatus);
+router.patch('/tickets/:id/status', requireAuth, requirePermission(['ticket.change_status', 'ticket.resolve', 'ticket.close']), ticketController.updateTicketStatus);
 router.post('/tickets/:id/threads', ticketController.addThreadMessage);
 
 // -------------------------------------------------------------------------------------------------
-// 4. ADMIN USER MANAGEMENT
+// 5. USER REGISTRATION APPROVAL (Admin Pusat)
 // -------------------------------------------------------------------------------------------------
-router.get('/admin/users', requireAuth, requireRole('admin'), userController.getUsers);
-router.post('/admin/users', requireAuth, requireRole('admin'), userController.createUser);
-router.patch('/admin/users/:id', requireAuth, requireRole('admin'), userController.updateUserRole);
-router.delete('/admin/users/:id', requireAuth, requireRole('admin'), userController.deleteUser);
+router.get('/admin/approvals', requireAuth, requirePermission(['approval.view', 'user.approve']), approvalController.getApprovals);
+router.post('/admin/approvals/:id/approve', requireAuth, requirePermission(['approval.manage', 'user.approve']), approvalController.approveRegistration);
+router.post('/admin/approvals/:id/reject', requireAuth, requirePermission(['approval.manage', 'user.reject']), approvalController.rejectRegistration);
 
 // -------------------------------------------------------------------------------------------------
-// 5. ADMIN CONFIG & AUDIT
+// 6. USER MANAGEMENT & GRANULAR ACCESS CONTROL
 // -------------------------------------------------------------------------------------------------
-router.get('/admin/audit-logs', requireAuth, requireRole(['admin', 'operator']), analyticsController.getAuditLogs);
+router.get('/admin/users', requireAuth, requirePermission('user.view'), userController.getUsers);
+router.post('/admin/users', requireAuth, requirePermission('user.create'), userController.createUser);
+router.patch('/admin/users/:id', requireAuth, requirePermission(['user.update', 'user.edit', 'user.assign_role']), userController.updateUserRole);
+router.delete('/admin/users/:id', requireAuth, requireRole(['ADMIN', 'ADMIN_PUSAT', 'admin']), userController.deleteUser);
+
+// Permission Overrides
+router.get('/admin/users/:id/permissions', requireAuth, requirePermission('permission.view'), userController.getUserPermissions);
+router.put('/admin/users/:id/permissions', requireAuth, requirePermission('permission.manage'), userController.updateUserPermissions);
+
+// User Account Status Controls
+router.post('/admin/users/:id/suspend', requireAuth, requirePermission(['user.deactivate', 'user.suspend']), userController.suspendUser);
+router.post('/admin/users/:id/activate', requireAuth, requirePermission(['user.update', 'user.activate']), userController.activateUser);
+router.post('/admin/users/:id/reset-mfa', requireAuth, requirePermission(['user.update', 'mfa.reset']), userController.resetUserMfa);
+
+// -------------------------------------------------------------------------------------------------
+// 7. AUDIT LOGS, FEATURE CONFIG & DB MONITOR
+// -------------------------------------------------------------------------------------------------
+router.get('/admin/audit-logs', requireAuth, requirePermission(['audit.view', 'audit_log.view']), analyticsController.getAuditLogs);
 router.get('/admin/features', requireAuth, analyticsController.getFeatureFlags);
-router.put('/admin/features', requireAuth, requireRole('admin'), analyticsController.updateFeatureFlags);
+router.put('/admin/features', requireAuth, requireRole(['ADMIN', 'ADMIN_PUSAT', 'admin']), analyticsController.updateFeatureFlags);
 router.get('/admin/db-status', requireAuth, analyticsController.getDbStatus);
 
 // -------------------------------------------------------------------------------------------------
-// 6. ANALYTICS
+// 8. TICKETING MONITORING & ANALYTICS (Scoped)
 // -------------------------------------------------------------------------------------------------
-router.get('/analytics', analyticsController.getAnalytics);
+router.get('/analytics', requireAuth, requirePermission(['monitoring.view', 'analytics.view']), analyticsController.getAnalytics);
 
 export default router;

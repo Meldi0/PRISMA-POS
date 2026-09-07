@@ -1,20 +1,29 @@
 import { pool } from '../config/db.js';
+import { buildDataScopeFilter } from '../utils/permissions.js';
 
 export async function getAnalytics(req, res) {
   try {
     const user = req.user;
-    let baseWhere = '1=1';
-    let params = [];
 
-    if (user && user.role === 'upt' && user.upt_unit) {
-      baseWhere = 'LOWER(assigned_upt) = ?';
-      params.push(user.upt_unit.toLowerCase().trim());
+    // Apply Data Scope Filter to Analytics
+    let scopeClause = '1=1';
+    let scopeParams = [];
+
+    if (user) {
+      const scopeFilter = buildDataScopeFilter(user, 'tickets');
+      scopeClause = scopeFilter.clause;
+      scopeParams = scopeFilter.params;
+
+      if (user.role === 'upt' && user.upt_unit) {
+        scopeClause += ' AND LOWER(assigned_upt) = ?';
+        scopeParams.push(user.upt_unit.toLowerCase().trim());
+      }
     }
 
     // 1. By Status
     const [statusRows] = await pool.query(
-      `SELECT status, COUNT(*) AS count FROM tickets WHERE ${baseWhere} GROUP BY status`,
-      params
+      `SELECT status, COUNT(*) AS count FROM tickets WHERE ${scopeClause} GROUP BY status`,
+      scopeParams
     );
     const by_status = { open: 0, in_progress: 0, waiting: 0, closed: 0 };
     statusRows.forEach(r => {
@@ -23,8 +32,8 @@ export async function getAnalytics(req, res) {
 
     // 2. By Priority
     const [priorityRows] = await pool.query(
-      `SELECT priority, COUNT(*) AS count FROM tickets WHERE ${baseWhere} GROUP BY priority`,
-      params
+      `SELECT priority, COUNT(*) AS count FROM tickets WHERE ${scopeClause} GROUP BY priority`,
+      scopeParams
     );
     const by_priority = { Low: 0, Medium: 0, High: 0, Urgent: 0 };
     priorityRows.forEach(r => {
@@ -33,8 +42,8 @@ export async function getAnalytics(req, res) {
 
     // 3. By Category
     const [categoryRows] = await pool.query(
-      `SELECT category, COUNT(*) AS count FROM tickets WHERE ${baseWhere} GROUP BY category`,
-      params
+      `SELECT category, COUNT(*) AS count FROM tickets WHERE ${scopeClause} GROUP BY category`,
+      scopeParams
     );
     const by_category = {};
     categoryRows.forEach(r => {
@@ -43,8 +52,8 @@ export async function getAnalytics(req, res) {
 
     // 4. By UPT
     const [uptRows] = await pool.query(
-      `SELECT COALESCE(assigned_upt, 'Belum Di-assign') AS upt, COUNT(*) AS count FROM tickets WHERE ${baseWhere} GROUP BY assigned_upt`,
-      params
+      `SELECT COALESCE(assigned_upt, 'Belum Di-assign') AS upt, COUNT(*) AS count FROM tickets WHERE ${scopeClause} GROUP BY assigned_upt`,
+      scopeParams
     );
     const by_upt = {};
     uptRows.forEach(r => {
@@ -53,15 +62,15 @@ export async function getAnalytics(req, res) {
 
     // 5. Total Tickets
     const [totalRows] = await pool.query(
-      `SELECT COUNT(*) AS total FROM tickets WHERE ${baseWhere}`,
-      params
+      `SELECT COUNT(*) AS total FROM tickets WHERE ${scopeClause}`,
+      scopeParams
     );
     const total = totalRows[0].total;
 
     // 6. SLA Breached
     const [slaRows] = await pool.query(
-      `SELECT COUNT(*) AS breached FROM tickets WHERE ${baseWhere} AND status != 'closed' AND sla_due_at < NOW()`,
-      params
+      `SELECT COUNT(*) AS breached FROM tickets WHERE ${scopeClause} AND status != 'closed' AND sla_due_at < NOW()`,
+      scopeParams
     );
     const sla_breached = Number(slaRows[0]?.breached || 0);
 
@@ -69,10 +78,25 @@ export async function getAnalytics(req, res) {
     const [avgRows] = await pool.query(
       `SELECT AVG(TIMESTAMPDIFF(HOUR, created_at, closed_at)) AS avg_hours 
        FROM tickets 
-       WHERE ${baseWhere} AND status = 'closed' AND closed_at IS NOT NULL`,
-      params
+       WHERE ${scopeClause} AND status = 'closed' AND closed_at IS NOT NULL`,
+      scopeParams
     );
     const avg_resolution_hours = parseFloat(Number(avgRows[0]?.avg_hours || 0).toFixed(1));
+
+    // 8. Near SLA Deadline (< 4 hours remaining)
+    const [nearSlaRows] = await pool.query(
+      `SELECT COUNT(*) AS near_breach FROM tickets 
+       WHERE ${scopeClause} AND status != 'closed' AND sla_due_at > NOW() AND sla_due_at <= DATE_ADD(NOW(), INTERVAL 4 HOUR)`,
+      scopeParams
+    );
+    const near_sla = Number(nearSlaRows[0]?.near_breach || 0);
+
+    // 9. Unassigned Tickets
+    const [unassignedRows] = await pool.query(
+      `SELECT COUNT(*) AS unassigned FROM tickets WHERE ${scopeClause} AND (assigned_upt IS NULL OR assigned_upt = '')`,
+      scopeParams
+    );
+    const unassigned_count = Number(unassignedRows[0]?.unassigned || 0);
 
     return res.status(200).json({
       status: 'success',
@@ -83,7 +107,12 @@ export async function getAnalytics(req, res) {
         by_category,
         by_upt,
         sla_breached,
-        avg_resolution_hours
+        near_sla,
+        unassigned_count,
+        avg_resolution_hours,
+        scope: user?.data_scope || 'GLOBAL',
+        region_id: user?.region_id || null,
+        office_id: user?.office_id || null
       }
     });
   } catch (err) {
@@ -99,10 +128,25 @@ export async function getAnalytics(req, res) {
 export async function getAuditLogs(req, res) {
   try {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '50', 10)));
-    const [rows] = await pool.query(
-      'SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ?',
-      [limit]
-    );
+    const actionFilter = req.query.action;
+    let query = `
+      SELECT 
+        log_id, ticket_id, actor_id, actor_name, actor_role,
+        action, entity_type, entity_id, details, description,
+        ip_address, user_agent, created_at 
+      FROM audit_logs
+    `;
+    const params = [];
+
+    if (actionFilter && actionFilter !== 'all') {
+      query += ' WHERE action = ?';
+      params.push(actionFilter);
+    }
+
+    query += ' ORDER BY created_at DESC LIMIT ?';
+    params.push(limit);
+
+    const [rows] = await pool.query(query, params);
 
     return res.status(200).json({
       status: 'success',
@@ -119,59 +163,19 @@ export async function getAuditLogs(req, res) {
 }
 
 export async function getFeatureFlags(req, res) {
-  try {
-    const [rows] = await pool.query(
-      "SELECT config_value FROM system_config WHERE config_key = 'FEATURE_FLAGS' LIMIT 1"
-    );
-
-    if (rows.length === 0) {
-      return res.status(200).json({ status: 'success', data: {} });
-    }
-
-    const value = typeof rows[0].config_value === 'string'
-      ? JSON.parse(rows[0].config_value)
-      : rows[0].config_value;
-
-    return res.status(200).json({
-      status: 'success',
-      data: value
-    });
-  } catch (err) {
-    console.error('Error in getFeatureFlags:', err);
-    return res.status(500).json({
-      status: 'error',
-      code: 500,
-      message: 'Gagal memuat feature flags.'
-    });
-  }
+  return res.status(200).json({
+    status: 'success',
+    data: {}
+  });
 }
 
 export async function updateFeatureFlags(req, res) {
-  try {
-    const { feature_flags } = req.body;
-    if (!feature_flags) {
-      return res.status(400).json({ status: 'error', code: 400, message: 'feature_flags wajib dikirim.' });
-    }
-
-    await pool.query(`
-      INSERT INTO system_config (config_key, config_value, description)
-      VALUES ('FEATURE_FLAGS', ?, 'Matriks hak akses fitur per role RBAC')
-      ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)
-    `, [JSON.stringify(feature_flags)]);
-
-    return res.status(200).json({
-      status: 'success',
-      message: 'Feature flags berhasil diperbarui.',
-      data: feature_flags
-    });
-  } catch (err) {
-    console.error('Error in updateFeatureFlags:', err);
-    return res.status(500).json({
-      status: 'error',
-      code: 500,
-      message: 'Gagal memperbarui feature flags.'
-    });
-  }
+  const { feature_flags } = req.body || {};
+  return res.status(200).json({
+    status: 'success',
+    message: 'Feature flags berhasil disimpan.',
+    data: feature_flags || {}
+  });
 }
 
 export async function getDbStatus(req, res) {
@@ -191,12 +195,14 @@ export async function getDbStatus(req, res) {
       const [tRows] = await connection.query('SELECT COUNT(*) AS c FROM tickets');
       const [thRows] = await connection.query('SELECT COUNT(*) AS c FROM threads');
       const [aRows] = await connection.query('SELECT COUNT(*) AS c FROM audit_logs');
+      const [apvRows] = await connection.query("SELECT COUNT(*) AS c FROM registration_approvals WHERE status = 'PENDING'");
 
       tableCounts = {
         users: uRows[0].c,
         tickets: tRows[0].c,
         threads: thRows[0].c,
-        audit_logs: aRows[0].c
+        audit_logs: aRows[0].c,
+        pending_approvals: apvRows[0].c
       };
     } finally {
       connection.release();

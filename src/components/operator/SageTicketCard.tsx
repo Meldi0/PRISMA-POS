@@ -4,6 +4,7 @@ import { PriorityBadge } from '../ui/Badge';
 import { SlaCountdown } from '../features/SlaCountdown';
 import { parseTicketDetails } from '../../utils/ticketFormatter';
 import { ArrowRight, CheckCheck, MapPin, Building2, Archive, RotateCcw } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 interface SageTicketCardProps {
   ticket: Ticket;
@@ -18,6 +19,21 @@ export const SageTicketCard: React.FC<SageTicketCardProps> = ({
   onStatusChange,
   isDragging = false
 }) => {
+  const { user, hasPermission } = useAuth();
+  const isPelapor = user?.role === 'UPT_LUAR' || user?.role === 'PELAPOR' || user?.role === 'pengguna_umum' || user?.role === 'USER_CABANG' || user?.role === 'USER_REGIONAL';
+  const canChangeStatus = !isPelapor && Boolean(
+    user?.role === 'ADMIN' || 
+    user?.role === 'PETUGAS_UPT' || 
+    user?.role === 'ADMIN_PUSAT' || 
+    user?.role === 'OPERATOR' ||
+    user?.role === 'admin' ||
+    user?.role === 'operator' ||
+    user?.role === 'upt' ||
+    hasPermission('ticket.change_status') ||
+    hasPermission('ticket.resolve') ||
+    hasPermission('ticket.close')
+  );
+
   const parsed = parseTicketDetails(ticket.description, ticket.category);
 
   const getCategoryColor = (cat: string) => {
@@ -77,9 +93,25 @@ export const SageTicketCard: React.FC<SageTicketCardProps> = ({
       </div>
 
       {/* Title / Subject */}
-      <h4 className="text-[14px] font-bold text-[#0F172A] leading-snug line-clamp-2 mb-2 group-hover:text-[#0D5C75] transition-colors">
+      <h4 className="text-[14px] font-bold text-[#0F172A] leading-snug line-clamp-2 mb-1.5 group-hover:text-[#0D5C75] transition-colors">
         {ticket.subject}
       </h4>
+
+      {/* Office & Region Badges */}
+      <div className="flex items-center gap-1.5 flex-wrap mb-2">
+        {ticket.office_name && (
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#F1F5F9] text-[#0D5C75] border border-[#CBD5E1]/60">
+            <Building2 size={11} className="text-[#0D5C75] shrink-0" />
+            <span>{ticket.office_name.replace(' 40000', '').replace(' 16000', '').replace(' 40500', '')}</span>
+          </span>
+        )}
+        {(ticket.region_code || ticket.region_name) && (
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#EAF4F8] text-[#199FB1] border border-[#199FB1]/30">
+            <MapPin size={11} className="text-[#199FB1] shrink-0" />
+            <span>{ticket.region_code || ticket.region_id}</span>
+          </span>
+        )}
+      </div>
 
       {/* Reporter & Location */}
       <p className="text-[12px] text-[#64748B] mb-3 truncate">
@@ -113,44 +145,46 @@ export const SageTicketCard: React.FC<SageTicketCardProps> = ({
           <span className="text-[11px] text-[#CBD5E1] italic">Belum didisposisi</span>
         )}
 
-        <div className="flex items-center gap-1">
-          {ticket.status === 'open' && (
-            <button
-              type="button"
-              onClick={handleProcess}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-[6px] text-[11px] font-bold bg-[#EAF4F8] text-[#0D5C75] hover:bg-[#0D5C75] hover:text-white transition-all cursor-pointer"
-            >
-              <ArrowRight size={12} />
-              <span>Proses</span>
-            </button>
-          )}
+        {canChangeStatus && (
+          <div className="flex items-center gap-1">
+            {ticket.status === 'open' && (
+              <button
+                type="button"
+                onClick={handleProcess}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-[6px] text-[11px] font-bold bg-[#EAF4F8] text-[#0D5C75] hover:bg-[#0D5C75] hover:text-white transition-all cursor-pointer"
+              >
+                <ArrowRight size={12} />
+                <span>Proses</span>
+              </button>
+            )}
 
-          {ticket.status === 'in_progress' && (
-            <button
-              type="button"
-              onClick={handleClose}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-[6px] text-[11px] font-bold bg-[#ECFDF5] text-[#059669] hover:bg-[#059669] hover:text-white transition-all cursor-pointer"
-            >
-              <CheckCheck size={12} />
-              <span>Selesai</span>
-            </button>
-          )}
+            {ticket.status === 'in_progress' && (
+              <button
+                type="button"
+                onClick={handleClose}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-[6px] text-[11px] font-bold bg-[#ECFDF5] text-[#059669] hover:bg-[#059669] hover:text-white transition-all cursor-pointer"
+              >
+                <CheckCheck size={12} />
+                <span>Selesai</span>
+              </button>
+            )}
 
-          {ticket.status === 'closed' && onStatusChange && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onStatusChange(ticket, 'in_progress');
-              }}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-[6px] text-[11px] font-bold bg-[#EFF6FF] border border-[#BAE6FD] text-[#0284C7] hover:bg-[#0284C7] hover:text-white transition-all cursor-pointer shadow-2xs"
-              title="Aktifkan kembali tiket ini ke antrean kerja aktif"
-            >
-              <RotateCcw size={11} />
-              <span>Buka Kembali</span>
-            </button>
-          )}
-        </div>
+            {ticket.status === 'closed' && onStatusChange && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStatusChange(ticket, 'in_progress');
+                }}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-[6px] text-[11px] font-bold bg-[#EFF6FF] border border-[#BAE6FD] text-[#0284C7] hover:bg-[#0284C7] hover:text-white transition-all cursor-pointer shadow-2xs"
+                title="Aktifkan kembali tiket ini ke antrean kerja aktif"
+              >
+                <RotateCcw size={11} />
+                <span>Buka Kembali</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -32,6 +32,8 @@ import { SageTableView } from '../../components/operator/SageTableView';
 import { SageTicketDrawer } from '../../components/operator/SageTicketDrawer';
 import { SageTicketTrackerView } from '../../components/operator/SageTicketTrackerView';
 import { UserManagement } from '../../components/admin/UserManagement';
+import { UserApprovalManagement } from '../../components/admin/UserApprovalManagement';
+import { AuditLogView } from '../../components/admin/AuditLogView';
 import { DataSourceConfig } from '../../components/admin/DataSourceConfig';
 import { CommandPalette } from '../../components/features/CommandPalette';
 import { OperatorTicketModal } from '../../components/operator/OperatorTicketModal';
@@ -41,8 +43,8 @@ import { realtimeService } from '../../services/realtime';
 import { FloatingChatBadge } from '../../components/notifications/FloatingChatBadge';
 
 export const OperatorDashboard: React.FC = () => {
-  const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const { user, hasPermission } = useAuth();
+  const isAdmin = user?.role === 'ADMIN_PUSAT' || user?.role === 'admin';
   const { success, error: toastError, info } = useToast();
 
   // Navigation & Layout state
@@ -137,7 +139,7 @@ export const OperatorDashboard: React.FC = () => {
           const newest = newTickets[0];
           soundService.playIncomingMessageSound();
           soundService.notifyBrowser(`Tiket Baru Masuk #${newest.ticket_id}`, `${newest.subject} (${newest.category})`);
-          info(`🔔 Tiket baru masuk: #${newest.ticket_id} - ${newest.subject}`);
+          info(`Tiket baru masuk: #${newest.ticket_id} - ${newest.subject}`);
         }
 
         // 2. Check for updated tickets with new replies from customer
@@ -150,20 +152,20 @@ export const OperatorDashboard: React.FC = () => {
                   const threads = detailRes.data.threads;
                   if (threads.length > 0) {
                     const latestMsg = threads[threads.length - 1];
-                    const isStaff = (latestMsg.sender_role === 'admin' || latestMsg.sender_role === 'operator' || latestMsg.sender_role === 'upt');
+                    const isStaff = (latestMsg.sender_role === 'ADMIN' || latestMsg.sender_role === 'PETUGAS_UPT' || latestMsg.sender_role === 'ADMIN_PUSAT' || latestMsg.sender_role === 'OPERATOR' || latestMsg.sender_role === 'admin' || latestMsg.sender_role === 'operator' || latestMsg.sender_role === 'upt');
                     if (!isStaff) {
                       realtimeService.addNotification({
                         id: `NOTIF-${latestMsg.thread_id || Date.now()}`,
                         ticket_id: t.ticket_id,
                         sender_name: latestMsg.sender_name || t.requester_name || 'Pelapor',
-                        sender_role: latestMsg.sender_role || 'pengguna_umum',
+                        sender_role: latestMsg.sender_role || 'UPT_LUAR',
                         message: latestMsg.message,
                         created_at: latestMsg.created_at,
                         is_read: false
                       });
                       soundService.playIncomingMessageSound();
                       soundService.notifyBrowser(`Balasan Baru di #${t.ticket_id}`, `${latestMsg.sender_name}: ${latestMsg.message.slice(0, 60)}`);
-                      info(`💬 Pesan baru dari ${latestMsg.sender_name} di #${t.ticket_id}`);
+                      info(`Pesan baru dari ${latestMsg.sender_name} di #${t.ticket_id}`);
                       if (typeof window !== 'undefined') {
                         window.dispatchEvent(new CustomEvent('poso_realtime_chat', { detail: {
                           id: `NOTIF-${latestMsg.thread_id || Date.now()}`,
@@ -545,11 +547,19 @@ export const OperatorDashboard: React.FC = () => {
               />
             )}
 
-            {activeView === 'users' && isAdmin && (
+            {activeView === 'approvals' && (
+              <UserApprovalManagement />
+            )}
+
+            {activeView === 'audit_log' && (
+              <AuditLogView />
+            )}
+
+            {activeView === 'users' && (hasPermission('user.view') || isAdmin) && (
               <UserManagement />
             )}
 
-            {activeView === 'datasource' && isAdmin && (
+            {activeView === 'datasource' && (hasPermission('system.config') || isAdmin) && (
               <DataSourceConfig />
             )}
 

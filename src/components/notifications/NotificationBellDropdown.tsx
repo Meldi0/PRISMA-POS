@@ -152,7 +152,7 @@ export const NotificationBellDropdown: React.FC<NotificationBellDropdownProps> =
 
                       {(() => {
                         const parsed = parseThreadMessage(n.message);
-                        const displaySnippet = parsed.cleanText || (parsed.attachments.length > 0 ? `📷 Mengirimkan ${parsed.attachments.length} foto/lampiran berkas` : n.message);
+                        const displaySnippet = parsed.cleanText || (parsed.attachments.length > 0 ? `Mengirimkan ${parsed.attachments.length} berkas/lampiran` : n.message);
                         return (
                           <p className="text-[11px] text-[#475569] line-clamp-2 leading-relaxed font-medium">
                             "{displaySnippet}"

@@ -58,7 +58,7 @@ export const PolytroxTicketTable: React.FC<PolytroxTicketTableProps> = ({
 
   const getPriorityText = (pr: string, isSelected: boolean) => {
     if (isSelected) {
-      return <span className="font-bold text-white flex items-center gap-1">{pr === 'Urgent' && '🔥 '}{pr} priority</span>;
+      return <span className="font-bold text-white flex items-center gap-1">{pr === 'Urgent' && <Flame className="w-3.5 h-3.5" />}{pr} priority</span>;
     }
     if (pr === 'Urgent') {
       return <span className="font-bold text-[#E75A38] flex items-center gap-1"><Flame className="w-3.5 h-3.5" /> Urgent (4 Jam)</span>;

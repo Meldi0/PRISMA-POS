@@ -52,12 +52,15 @@ export const MyTicketsPage: React.FC = () => {
       if (res && res.status === 'success' && res.data) {
         const allTickets = res.data.tickets || [];
         const userTickets = allTickets.filter(t => 
-          (t.requester_email || '').toLowerCase() === user.email.toLowerCase()
+          (t.requester_email || '').toLowerCase() === user.email.toLowerCase() ||
+          (t.requester_name || '').toLowerCase() === (user.name || '').toLowerCase() ||
+          (user.office_id && t.office_id === user.office_id)
         );
+        const finalTickets = userTickets.length > 0 ? userTickets : allTickets;
 
         // Check for any status updates on user's tickets
         if (!isInitialLoadRef.current) {
-          userTickets.forEach(t => {
+          finalTickets.forEach(t => {
             const oldStatus = prevStatusMapRef.current[t.ticket_id];
             if (oldStatus && oldStatus !== t.status) {
               soundService.playIncomingMessageSound();
@@ -65,19 +68,19 @@ export const MyTicketsPage: React.FC = () => {
                 `Pembaruan Status Tiket #${t.ticket_id}`,
                 `Status tiket "${t.subject}" kini berubah menjadi ${t.status.toUpperCase()}`
               );
-              info(`📢 Tiket #${t.ticket_id} diperbarui statusnya menjadi: ${t.status}`);
+              info(`Tiket #${t.ticket_id} diperbarui statusnya menjadi: ${t.status}`);
             }
           });
         }
 
         const newStatusMap: Record<string, string> = {};
-        userTickets.forEach(t => {
+        finalTickets.forEach(t => {
           newStatusMap[t.ticket_id] = t.status;
         });
         prevStatusMapRef.current = newStatusMap;
         isInitialLoadRef.current = false;
 
-        setTickets(userTickets);
+        setTickets(finalTickets);
       }
     } catch (err) {
       console.error('Error fetching user tickets:', err);
@@ -116,15 +119,15 @@ export const MyTicketsPage: React.FC = () => {
       <header className="sticky top-0 z-40 backdrop-blur-md bg-white/80 border-b border-[#E2E8F0]/80">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Link to="/" className="w-10 h-10 rounded-[10px] bg-white border border-[#E2E8F0] p-1 flex items-center justify-center shadow-2xs hover:border-[#0D5C75] transition-colors">
+            <Link to="/my-tickets" className="w-10 h-10 rounded-[10px] bg-white border border-[#E2E8F0] p-1 flex items-center justify-center shadow-2xs hover:border-[#0D5C75] transition-colors">
               <img src="/prisma-pos-logo.png" alt="PRISMA POS Logo" className="w-full h-full object-contain" />
             </Link>
             <div>
               <h1 className="text-[16px] font-bold text-[#0F172A] leading-tight flex items-center gap-2">
-                <span>Tiket Saya</span>
+                <span>Portal Pelapor UPT</span>
                 <span className="text-[10px] font-extrabold text-[#0D5C75] bg-[#EAF4F8] px-2 py-0.5 rounded-full">PRISMA POS</span>
               </h1>
-              <p className="text-[11px] text-[#64748B]">{user?.name || user?.email || 'Pelapor'}</p>
+              <p className="text-[11px] text-[#64748B]">{user?.name || user?.email || 'Pelapor Dinas'}</p>
             </div>
           </div>
 
@@ -147,7 +150,7 @@ export const MyTicketsPage: React.FC = () => {
             </Link>
 
             <button
-              onClick={() => { logout(); navigate('/'); }}
+              onClick={() => { logout(); navigate('/login'); }}
               className="p-2 rounded-[10px] text-[#64748B] hover:text-[#DC2626] hover:bg-rose-50 transition-colors cursor-pointer"
               title="Keluar"
             >
@@ -159,6 +162,52 @@ export const MyTicketsPage: React.FC = () => {
 
       {/* Main Container */}
       <main className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 flex-1 w-full space-y-6">
+        
+        {/* Banner Identitas Staf UPT & Penjelasan Alur Helpdesk */}
+        <div className="bg-gradient-to-r from-[#083342] via-[#0D5C75] to-[#199FB1] rounded-[22px] p-6 text-white shadow-md relative overflow-hidden">
+          <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-white/5 rounded-full pointer-events-none blur-xl" />
+          <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-bold tracking-wider uppercase">
+                  Identitas Pelapor UPT
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/30 border border-emerald-400/40 text-emerald-200 text-[10px] font-bold">
+                  Akun Dinas Aktif
+                </span>
+              </div>
+              <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white">
+                {user?.name || 'Staf UPT'}
+              </h2>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#BAE6FD]">
+                <span>Jabatan: <strong className="text-white">{user?.position || 'Staf Operasional'}</strong></span>
+                <span>•</span>
+                <span>NOPEN / NIP: <strong className="text-white font-mono">{user?.nip || user?.nopen_kc || '-'}</strong></span>
+                <span>•</span>
+                <span>Asal UPT: <strong className="text-white">{user?.office_name || user?.office_id || 'KCU Bandung'}</strong></span>
+                <span>•</span>
+                <span>Regional: <strong className="text-white">{user?.region_name || user?.region_code || 'Regional 3'}</strong></span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 flex-shrink-0">
+              <Link
+                to="/submit"
+                className="flex items-center gap-2 h-11 px-4 rounded-xl bg-white text-[#0D5C75] font-bold text-xs hover:bg-[#F0F9FF] transition-all shadow-sm active:scale-95"
+              >
+                <Plus size={16} />
+                <span>Buat Tiket Kendala</span>
+              </Link>
+            </div>
+          </div>
+
+          <div className="mt-4 pt-3.5 border-t border-white/15 flex items-start sm:items-center gap-2.5 text-xs text-white/90">
+            <AlertCircle size={16} className="text-[#38BDF8] flex-shrink-0 mt-0.5 sm:mt-0" />
+            <p className="leading-relaxed">
+              <strong>Alur Kerja Helpdesk:</strong> Tiket yang Anda buat akan langsung diteruskan ke antrean nasional <strong>Kantor Pusat (Operator & Administrator)</strong>. Operator Pusat akan merespons dan menindaklanjuti kendala Anda. Anda dapat berinteraksi langsung melalui percakapan tiket.
+            </p>
+          </div>
+        </div>
         
         {/* Search & Filters */}
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
@@ -264,7 +313,7 @@ export const MyTicketsPage: React.FC = () => {
                       to={`/track?id=${t.ticket_id}`}
                       className="text-[12px] font-bold text-[#199FB1] hover:text-[#0D5C75] flex items-center gap-1"
                     >
-                      Detail & Tindak Lanjut →
+                      Buka Percakapan / Detail →
                     </Link>
                   </div>
                 </div>

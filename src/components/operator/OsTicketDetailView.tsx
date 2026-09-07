@@ -384,8 +384,27 @@ export const OsTicketDetailView: React.FC<OsTicketDetailViewProps> = ({
             </h3>
 
             <div className="grid grid-cols-3 gap-2 items-center py-0.5">
+              <span className="text-slate-400 font-medium">Pelapor & NOPEN:</span>
+              <span className="col-span-2 text-slate-100 font-bold text-sm">
+                {ticket.requester_name || 'Pelapor Dinas'}
+                {ticket.requester_nip && (
+                  <span className="ml-2 font-mono text-xs px-1.5 py-0.5 rounded bg-slate-800 text-indigo-300 border border-slate-700">
+                    NOPEN: {ticket.requester_nip}
+                  </span>
+                )}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 items-center py-0.5">
+              <span className="text-slate-400 font-medium">Asal Kantor UPT:</span>
+              <span className="col-span-2 text-cyan-300 font-bold">
+                {ticket.office_name || ticket.office_id || 'KCU Bandung'} ({ticket.region_name || ticket.region_code || 'Regional 3'})
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 items-center py-0.5">
               <span className="text-slate-400 font-medium">Email Pelapor:</span>
-              <span className="col-span-2 font-mono text-indigo-300 font-bold text-sm truncate">{ticket.requester_email}</span>
+              <span className="col-span-2 font-mono text-indigo-300 font-bold text-xs truncate">{ticket.requester_email}</span>
             </div>
 
             <div className="grid grid-cols-3 gap-2 items-center py-0.5">
@@ -395,8 +414,15 @@ export const OsTicketDetailView: React.FC<OsTicketDetailViewProps> = ({
 
             <div className="grid grid-cols-3 gap-2 items-center py-0.5">
               <span className="text-slate-400 font-medium">Unit UPT Ditugaskan:</span>
-              <span className="col-span-2 font-bold text-amber-300 text-sm">
-                {ticket.assigned_upt ? `🛡️ ${ticket.assigned_upt}` : '— Belum ditugaskan —'}
+              <span className="col-span-2 font-bold text-amber-300 text-sm flex items-center gap-1.5">
+                {ticket.assigned_upt ? (
+                  <>
+                    <ShieldCheck size={16} className="text-amber-400 shrink-0" />
+                    <span>{ticket.assigned_upt}</span>
+                  </>
+                ) : (
+                  '— Belum ditugaskan —'
+                )}
               </span>
             </div>
 
@@ -507,7 +533,7 @@ export const OsTicketDetailView: React.FC<OsTicketDetailViewProps> = ({
                   <div className="flex items-center justify-between pb-2 border-b border-amber-500/30 text-amber-300">
                     <span className="font-bold flex items-center gap-2">
                       <Lock className="w-4 h-4 text-amber-400" />
-                      <span className="text-xs tracking-wide">🔒 CATATAN INTERNAL KHUSUS STAF (Tidak dapat dilihat oleh Pelapor)</span>
+                      <span className="text-xs tracking-wide">CATATAN INTERNAL KHUSUS STAF (Tidak dapat dilihat oleh Pelapor)</span>
                     </span>
                     <span className="text-[11px] text-slate-400 font-medium">
                       Oleh: <strong className="text-amber-200">{t.sender_name || 'Staff'}</strong> • {new Date(t.created_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
@@ -587,7 +613,7 @@ export const OsTicketDetailView: React.FC<OsTicketDetailViewProps> = ({
             }`}
           >
             <Globe className="w-4 h-4 text-indigo-400" />
-            <span>💬 Balas ke Pelapor (Publik)</span>
+            <span>Balas ke Pelapor (Publik)</span>
           </button>
 
           <button
@@ -600,7 +626,7 @@ export const OsTicketDetailView: React.FC<OsTicketDetailViewProps> = ({
             }`}
           >
             <Lock className="w-4 h-4 text-amber-400" />
-            <span>🔒 Tulis Catatan Internal (Privat)</span>
+            <span>Tulis Catatan Internal (Privat)</span>
           </button>
         </div>
 
@@ -655,7 +681,7 @@ export const OsTicketDetailView: React.FC<OsTicketDetailViewProps> = ({
                 className="flex items-center gap-2 px-6 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs sm:text-sm font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50"
               >
                 <Lock className="w-4 h-4" />
-                <span>{isSubmitting ? 'Menyimpan Catatan...' : 'Simpan Catatan Internal 🔒'}</span>
+                <span>{isSubmitting ? 'Menyimpan Catatan...' : 'Simpan Catatan Internal'}</span>
               </button>
             </div>
           </form>

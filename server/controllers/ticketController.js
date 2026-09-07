@@ -1,4 +1,5 @@
 import { pool } from '../config/db.js';
+import { buildDataScopeFilter } from '../utils/permissions.js';
 
 export function isUptUnitMatch(userUnit, ticketUnit) {
   if (!userUnit || !ticketUnit) return false;
@@ -45,36 +46,24 @@ export async function getTickets(req, res) {
     let conditions = ['1=1'];
     let params = [];
 
-    // RBAC Permissions Filter
+    // 1. DATA SCOPE FILTERING (GLOBAL, REGIONAL, OFFICE, OWN)
     if (user) {
-      if (user.role === 'pengguna_umum') {
-        conditions.push('LOWER(requester_email) = ?');
-        params.push(user.email.toLowerCase().trim());
-      } else if (user.role === 'upt' && user.upt_unit) {
+      const scopeFilter = buildDataScopeFilter(user, 'tickets');
+      conditions.push(scopeFilter.clause);
+      params.push(...scopeFilter.params);
+
+      // Legacy support for UPT unit matching if user is legacy UPT
+      if (user.role === 'upt' && user.upt_unit) {
         const unit = user.upt_unit.toLowerCase().trim();
-        if (unit.includes('ti') || unit.includes('it') || unit.includes('jaringan') || unit.includes('sistem')) {
-          conditions.push('(LOWER(assigned_upt) LIKE ? OR LOWER(assigned_upt) LIKE ? OR LOWER(assigned_upt) LIKE ? OR LOWER(requester_email) = ?)');
-          params.push('%ti%', '%jaringan%', '%sistem%', user.email.toLowerCase().trim());
-        } else if (unit.includes('sarpras') || unit.includes('sarana') || unit.includes('cgs')) {
-          conditions.push('(LOWER(assigned_upt) LIKE ? OR LOWER(assigned_upt) LIKE ? OR LOWER(assigned_upt) LIKE ? OR LOWER(requester_email) = ?)');
-          params.push('%sarana%', '%sarpras%', '%cgs%', user.email.toLowerCase().trim());
-        } else if (unit.includes('sec') || unit.includes('keamanan') || unit.includes('security')) {
-          conditions.push('(LOWER(assigned_upt) LIKE ? OR LOWER(assigned_upt) LIKE ? OR LOWER(requester_email) = ?)');
-          params.push('%security%', '%keamanan%', user.email.toLowerCase().trim());
-        } else if (unit.includes('qc') || unit.includes('quality')) {
-          conditions.push('(LOWER(assigned_upt) LIKE ? OR LOWER(assigned_upt) LIKE ? OR LOWER(requester_email) = ?)');
-          params.push('%quality%', '%qc%', user.email.toLowerCase().trim());
-        } else {
-          conditions.push('(LOWER(assigned_upt) = ? OR LOWER(assigned_upt) LIKE ? OR LOWER(requester_email) = ?)');
-          params.push(unit, `%${unit}%`, user.email.toLowerCase().trim());
-        }
+        conditions.push('(LOWER(assigned_upt) LIKE ? OR LOWER(assigned_upt) LIKE ? OR LOWER(requester_email) = ?)');
+        params.push(`%${unit}%`, `%${unit.split(' ')[0]}%`, user.email.toLowerCase().trim());
       }
     } else if (requester_email) {
       conditions.push('LOWER(requester_email) = ?');
       params.push(requester_email.toLowerCase().trim());
     }
 
-    // Query Filters
+    // 2. Query Parameter Filters
     if (status && status !== 'all') {
       conditions.push('LOWER(status) = ?');
       params.push(status.toLowerCase().trim());
@@ -106,9 +95,21 @@ export async function getTickets(req, res) {
     );
     const total = countRows[0].total;
 
-    // Fetch Paginated Records
+    // Fetch Paginated Records with Region and Office details
     const [rows] = await pool.query(
-      `SELECT * FROM tickets WHERE ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      `SELECT 
+        tickets.*,
+        r.name AS region_name,
+        r.code AS region_code,
+        o.name AS office_name,
+        o.code AS office_code,
+        o.type AS office_type
+      FROM tickets
+      LEFT JOIN regions r ON tickets.region_id = r.region_id
+      LEFT JOIN offices o ON tickets.office_id = o.office_id
+      WHERE ${whereClause} 
+      ORDER BY tickets.created_at DESC 
+      LIMIT ? OFFSET ?`,
       [...params, limitNum, offset]
     );
 
@@ -143,7 +144,18 @@ export async function getTicketDetail(req, res) {
     const user = req.user;
 
     const [ticketRows] = await pool.query(
-      'SELECT * FROM tickets WHERE ticket_id = ? LIMIT 1',
+      `SELECT 
+        t.*,
+        r.name AS region_name,
+        r.code AS region_code,
+        o.name AS office_name,
+        o.code AS office_code,
+        o.type AS office_type
+      FROM tickets t
+      LEFT JOIN regions r ON t.region_id = r.region_id
+      LEFT JOIN offices o ON t.office_id = o.office_id
+      WHERE t.ticket_id = ? 
+      LIMIT 1`,
       [id]
     );
 
@@ -157,19 +169,29 @@ export async function getTicketDetail(req, res) {
 
     const ticket = ticketRows[0];
 
-    // RBAC Access Check
-    if (user && user.role === 'pengguna_umum') {
-      if (ticket.requester_email.toLowerCase() !== user.email.toLowerCase()) {
-        return res.status(403).json({
-          status: 'error',
-          code: 403,
-          message: 'Anda tidak memiliki wewenang untuk mengakses tiket ini.'
-        });
+    // Data Scope Authorization Check
+    if (user) {
+      const role = user.role;
+      const isPrivileged = role === 'ADMIN' || role === 'PETUGAS_UPT' || role === 'ADMIN_PUSAT' || role === 'OPERATOR';
+
+      if (!isPrivileged) {
+        // UPT_LUAR: allowed if own ticket OR same office
+        const isOwn = (ticket.requester_email && user.email && ticket.requester_email.toLowerCase() === user.email.toLowerCase()) ||
+                      (ticket.requester_name && user.name && ticket.requester_name.toLowerCase() === user.name.toLowerCase());
+        const isSameOffice = user.office_id && ticket.office_id && user.office_id === ticket.office_id;
+
+        if (!isOwn && !isSameOffice) {
+          return res.status(403).json({
+            status: 'error',
+            code: 403,
+            message: 'Akses ditolak. Anda tidak memiliki wewenang untuk mengakses tiket di luar kantor/unit penugasan Anda.'
+          });
+        }
       }
     }
 
     // Fetch threads
-    const isStaff = user && (user.role === 'operator' || user.role === 'upt' || user.role === 'admin');
+    const isStaff = user && (user.role === 'ADMIN' || user.role === 'PETUGAS_UPT' || user.role === 'ADMIN_PUSAT' || user.role === 'OPERATOR');
     let threadQuery = 'SELECT * FROM threads WHERE ticket_id = ?';
     const threadParams = [id];
 
@@ -183,7 +205,10 @@ export async function getTicketDetail(req, res) {
     return res.status(200).json({
       status: 'success',
       data: {
-        ticket,
+        ticket: {
+          ...ticket,
+          is_archived: Boolean(ticket.is_archived)
+        },
         threads: threadRows
       }
     });
@@ -203,7 +228,18 @@ export async function trackTicket(req, res) {
     const { email } = req.query;
 
     const [ticketRows] = await pool.query(
-      'SELECT * FROM tickets WHERE ticket_id = ? LIMIT 1',
+      `SELECT 
+        t.*,
+        r.name AS region_name,
+        r.code AS region_code,
+        o.name AS office_name,
+        o.code AS office_code,
+        o.type AS office_type
+      FROM tickets t
+      LEFT JOIN regions r ON t.region_id = r.region_id
+      LEFT JOIN offices o ON t.office_id = o.office_id
+      WHERE t.ticket_id = ? 
+      LIMIT 1`,
       [id.trim()]
     );
 
@@ -218,26 +254,28 @@ export async function trackTicket(req, res) {
     const ticket = ticketRows[0];
 
     if (email && email.trim()) {
-      if (ticket.requester_email.toLowerCase().trim() !== email.toLowerCase().trim()) {
+      if (ticket.requester_email.toLowerCase() !== email.toLowerCase().trim()) {
         return res.status(403).json({
           status: 'error',
           code: 403,
-          message: 'Alamat email pelapor tidak cocok dengan tiket ini.'
+          message: 'Alamat email tidak cocok dengan email pelapor tiket ini.'
         });
       }
     }
 
-    // Only public threads for tracker
-    const [threadRows] = await pool.query(
+    const [threads] = await pool.query(
       "SELECT * FROM threads WHERE ticket_id = ? AND visibility = 'public' ORDER BY created_at ASC",
-      [id.trim()]
+      [ticket.ticket_id]
     );
 
     return res.status(200).json({
       status: 'success',
       data: {
-        ticket,
-        threads: threadRows
+        ticket: {
+          ...ticket,
+          is_archived: Boolean(ticket.is_archived)
+        },
+        threads
       }
     });
   } catch (err) {
@@ -245,13 +283,12 @@ export async function trackTicket(req, res) {
     return res.status(500).json({
       status: 'error',
       code: 500,
-      message: 'Terjadi kesalahan saat melacak tiket.'
+      message: 'Gagal melacak tiket.'
     });
   }
 }
 
 export async function createTicket(req, res) {
-  const connection = await pool.getConnection();
   try {
     const user = req.user;
     const {
@@ -266,246 +303,237 @@ export async function createTicket(req, res) {
       requester_name,
       requester_email,
       requester_phone,
+      requester_nip,
       assigned_upt,
-      assigned_operator,
+      region_id,
+      office_id,
       attachments = []
     } = req.body;
 
-    const cleanSubject = (subject || '').trim();
-    const cleanDesc = (description || '').trim();
-    const cleanCategory = (category || 'Umum').trim();
-    const emailToUse = user ? user.email : (requester_email || '').toLowerCase().trim();
-    const nameToUse = user ? user.name : (requester_name || 'Pelapor').trim();
+    const finalCategory = category || department || 'OPERASIONAL';
 
-    if (!cleanSubject || !cleanDesc || !emailToUse) {
+    if (!subject || !finalCategory || !description) {
       return res.status(400).json({
         status: 'error',
         code: 400,
-        message: 'Subjek, deskripsi, dan email pelapor wajib diisi.'
+        message: 'Subjek, kategori/departemen, dan deskripsi keluhan wajib diisi.'
       });
     }
 
-    // SLA Calculation
-    const now = new Date();
-    let slaHours = 24;
-    const prioLower = priority.toLowerCase();
-    if (prioLower === 'urgent') slaHours = 2;
-    else if (prioLower === 'high') slaHours = 8;
-    else if (prioLower === 'low') slaHours = 72;
-    const slaDueDate = new Date(now.getTime() + slaHours * 3600000);
+    const email = (user ? user.email : requester_email || '').toLowerCase().trim();
+    const name = user ? user.name : requester_name || 'Pelapor Dinas';
+    const phone = requester_phone || (user ? user.phone_number : null);
+    const nip = requester_nip || (user ? user.nip : null);
 
-    const datePrefix = now.toISOString().slice(0, 10).replace(/-/g, '');
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    const ticketId = `TICK-${datePrefix}-${randomSuffix}`;
-    const threadId = `TH-${Date.now().toString().slice(-6)}`;
-
-    await connection.beginTransaction();
-
-    // 1. Insert into tickets
-    await connection.query(`
-      INSERT INTO tickets (
-        ticket_id, subject, category, department, topic, location, description,
-        priority, status, channel, requester_name, requester_email, requester_phone,
-        assigned_upt, assigned_operator, sla_due_at, attachments
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      ticketId, cleanSubject, cleanCategory, department || null, topic || null, location || null,
-      cleanDesc, priority, channel, nameToUse, emailToUse, requester_phone || null,
-      assigned_upt || null, assigned_operator || null, slaDueDate, JSON.stringify(attachments)
-    ]);
-
-    // 2. Insert initial thread message
-    let initialMessage = cleanDesc;
-    if (attachments && attachments.length > 0) {
-      const attLines = attachments.map(a => `• ${a.name || 'lampiran'}: ${a.url || a.dataUrl || ''}`).join('\n');
-      initialMessage += `\n\n[Lampiran Berkas]:\n${attLines}`;
+    if (!email) {
+      return res.status(400).json({
+        status: 'error',
+        code: 400,
+        message: 'Email pelapor wajib disertakan.'
+      });
     }
 
-    await connection.query(`
+    // Auto-inherit region & office from logged-in user if available
+    const finalRegionId = region_id || (user ? user.region_id : 'REG-03');
+    const finalOfficeId = office_id || (user ? user.office_id : 'OFC-KCU-BDG');
+
+    // Generate Ticket ID
+    const today = new Date();
+    const dateStr = today.getFullYear().toString() + 
+      (today.getMonth() + 1).toString().padStart(2, '0') + 
+      today.getDate().toString().padStart(2, '0');
+    const randomPart = Math.floor(1000 + Math.random() * 9000);
+    const ticketId = `TICK-${dateStr}-${randomPart}`;
+
+    // SLA Calculation
+    let slaHours = 24;
+    if (priority === 'Urgent') slaHours = 4;
+    else if (priority === 'High') slaHours = 8;
+    else if (priority === 'Medium') slaHours = 24;
+    else if (priority === 'Low') slaHours = 72;
+
+    const slaDueAt = new Date(Date.now() + slaHours * 3600000);
+
+    await pool.query(`
+      INSERT INTO tickets (
+        ticket_id, subject, category, department, topic, location,
+        description, priority, status, channel, requester_name, requester_email,
+        requester_phone, requester_nip, assigned_upt, region_id, office_id, sla_due_at, attachments
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      ticketId, subject.trim(), finalCategory.trim(), department || null, topic || null,
+      location || null, description, priority, channel, name, email, phone,
+      nip || null, assigned_upt || null, finalRegionId, finalOfficeId, slaDueAt,
+      JSON.stringify(attachments)
+    ]);
+
+    // Insert Initial Thread
+    const threadId = `TH-${Date.now().toString().slice(-6)}`;
+    await pool.query(`
       INSERT INTO threads (
         thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility
       ) VALUES (?, ?, ?, ?, ?, ?, 'public')
     `, [
-      threadId, ticketId, user ? user.user_id : 'USR-PUBLIC', nameToUse,
-      user ? user.role : 'pengguna_umum', initialMessage
+      threadId, ticketId, user ? user.user_id : 'PUBLIC', name,
+      user ? user.role : 'PELAPOR', description
     ]);
 
-    // 3. Log to audit_logs
-    await connection.query(`
-      INSERT INTO audit_logs (
-        log_id, ticket_id, actor_id, actor_name, actor_role, action, details
-      ) VALUES (?, ?, ?, ?, ?, 'CREATE_TICKET', ?)
-    `, [
-      `LOG-${Date.now().toString().slice(-6)}`, ticketId, user ? user.user_id : 'USR-PUBLIC',
-      nameToUse, user ? user.role : 'pengguna_umum', `Tiket dibuat oleh ${emailToUse}: ${cleanSubject}`
-    ]);
+    // Audit Log
+    try {
+      await pool.query(`
+        INSERT INTO audit_logs (log_id, ticket_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
+        VALUES (?, ?, ?, ?, 'CREATE_TICKET', 'TICKET', ?, ?, ?)
+      `, [
+        `LOG-${Date.now().toString().slice(-6)}`, ticketId, user ? user.user_id : 'PUBLIC',
+        name, user ? user.role : 'PELAPOR', ticketId,
+        `Pembuatan tiket baru #${ticketId} prioritas ${priority}`,
+        `Pengajuan tiket baru oleh ${email}`
+      ]);
+    } catch (e) {}
 
-    await connection.commit();
+    const [newTicket] = await pool.query('SELECT * FROM tickets WHERE ticket_id = ?', [ticketId]);
 
-    const [newTicket] = await connection.query('SELECT * FROM tickets WHERE ticket_id = ?', [ticketId]);
+    const ticketData = {
+      ...newTicket[0],
+      ticket_id: ticketId,
+      is_archived: Boolean(newTicket[0].is_archived)
+    };
 
     return res.status(201).json({
       status: 'success',
       code: 201,
-      message: 'Tiket berhasil dibuat dan tersimpan di database.',
-      data: newTicket[0]
+      message: 'Tiket berhasil dibuat dan diterbitkan.',
+      data: {
+        ...ticketData,
+        ticket: ticketData,
+        ticket_id: ticketId
+      }
     });
   } catch (err) {
-    await connection.rollback();
     console.error('Error in createTicket:', err);
     return res.status(500).json({
       status: 'error',
       code: 500,
-      message: err.sqlMessage || err.message || 'Gagal membuat tiket baru.'
+      message: 'Gagal membuat tiket.'
     });
-  } finally {
-    connection.release();
   }
 }
 
 export async function updateTicketStatus(req, res) {
-  const connection = await pool.getConnection();
   try {
-    const user = req.user;
     const { id } = req.params;
-    const { status, priority, assigned_upt, assigned_operator, is_archived } = req.body;
+    const { status, note, assigned_upt, assigned_operator, priority, is_archived } = req.body;
+    const user = req.user;
 
-    if (user && user.role === 'pengguna_umum') {
+    const [ticketRows] = await pool.query('SELECT * FROM tickets WHERE ticket_id = ? LIMIT 1', [id]);
+    if (ticketRows.length === 0) {
+      return res.status(404).json({ status: 'error', code: 404, message: 'Tiket tidak ditemukan.' });
+    }
+
+    const ticket = ticketRows[0];
+
+    // UPT_LUAR is strictly prohibited from modifying ticket status or closing tickets!
+    if (user && (user.role === 'UPT_LUAR' || user.role === 'PELAPOR' || user.role === 'pengguna_umum')) {
       return res.status(403).json({
         status: 'error',
         code: 403,
-        message: 'Pelapor tidak berwenang mengubah status atau disposisi tiket.'
+        message: 'Akses ditolak. Pengguna UPT Luar tidak memiliki wewenang untuk mengubah status atau menutup tiket. Penutupan dan perubahan status tiket hanya dapat dilakukan oleh Petugas UPT Pusat atau Admin.'
       });
-    }
-
-    const [existing] = await connection.query('SELECT * FROM tickets WHERE ticket_id = ? LIMIT 1', [id]);
-    if (existing.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        code: 404,
-        message: 'Tiket tidak ditemukan.'
-      });
-    }
-
-    const curr = existing[0];
-
-    // UPT restriction: can only process their assigned tickets
-    if (user && user.role === 'upt') {
-      if (user.upt_unit && curr.assigned_upt && !isUptUnitMatch(user.upt_unit, curr.assigned_upt)) {
-        return res.status(403).json({
-          status: 'error',
-          code: 403,
-          message: 'UPT hanya berwenang memproses tiket yang didelegasikan ke unitnya.'
-        });
-      }
     }
 
     const updates = [];
     const params = [];
-    const changeLogs = [];
 
-    if (status && status !== curr.status) {
+    if (status && status !== ticket.status) {
       updates.push('status = ?');
       params.push(status);
-      changeLogs.push(`Status: ${curr.status} -> ${status}`);
+
       if (status === 'closed') {
         updates.push('closed_at = NOW()');
         updates.push('is_archived = 1');
       } else {
+        updates.push('closed_at = NULL');
         updates.push('is_archived = 0');
       }
     }
 
-    if (priority && priority !== curr.priority) {
+    if (is_archived !== undefined) {
+      updates.push('is_archived = ?');
+      params.push(is_archived ? 1 : 0);
+    }
+
+    if (assigned_upt !== undefined) {
+      updates.push('assigned_upt = ?');
+      params.push(assigned_upt);
+    }
+
+    if (priority !== undefined) {
       updates.push('priority = ?');
       params.push(priority);
-      changeLogs.push(`Prioritas: ${curr.priority} -> ${priority}`);
     }
 
-    if (assigned_upt !== undefined && assigned_upt !== curr.assigned_upt) {
-      updates.push('assigned_upt = ?');
-      params.push(assigned_upt || null);
-      changeLogs.push(`UPT: ${curr.assigned_upt || 'None'} -> ${assigned_upt || 'None'}`);
+    if (updates.length === 0 && !note) {
+      return res.status(400).json({ status: 'error', code: 400, message: 'Tidak ada data pembaruan yang dikirim.' });
     }
 
-    if (assigned_operator !== undefined && assigned_operator !== curr.assigned_operator) {
-      updates.push('assigned_operator = ?');
-      params.push(assigned_operator || null);
-      changeLogs.push(`Operator: ${curr.assigned_operator || 'None'} -> ${assigned_operator || 'None'}`);
+    if (updates.length > 0) {
+      updates.push('updated_at = NOW()');
+      params.push(id);
+      await pool.query(`UPDATE tickets SET ${updates.join(', ')} WHERE ticket_id = ?`, params);
     }
 
-    if (is_archived !== undefined) {
-      const archVal = is_archived ? 1 : 0;
-      updates.push('is_archived = ?');
-      params.push(archVal);
-      changeLogs.push(archVal ? 'Tiket dipindahkan ke arsip' : 'Tiket dipulihkan dari arsip');
+    // Add note as thread message if provided
+    if (note && note.trim()) {
+      const threadId = `TH-${Date.now().toString().slice(-6)}`;
+      const visibility = (status === 'closed' || status === 'waiting') ? 'public' : 'internal';
+      await pool.query(`
+        INSERT INTO threads (thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `, [
+        threadId, id, user ? user.user_id : 'STAFF', user ? user.name : 'Petugas Helpdesk',
+        user ? user.role : 'PETUGAS_UPT', note.trim(), visibility
+      ]);
     }
 
-    if (updates.length === 0) {
-      return res.status(200).json({
-        status: 'success',
-        message: 'Tidak ada perubahan data.',
-        data: curr
-      });
-    }
+    // Audit Log
+    try {
+      await pool.query(`
+        INSERT INTO audit_logs (log_id, ticket_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
+        VALUES (?, ?, ?, ?, 'STATUS_CHANGE', 'TICKET', ?, ?, ?)
+      `, [
+        `LOG-${Date.now().toString().slice(-6)}`, id, user ? user.user_id : 'STAFF',
+        user ? user.name : 'Petugas', user ? user.role : 'PETUGAS_UPT', id,
+        `Status: ${ticket.status} -> ${status || ticket.status}${assigned_operator ? `, Operator: ${assigned_operator}` : ''}`,
+        `Pembaruan tiket oleh ${user ? user.name : 'Petugas'}`
+      ]);
+    } catch (e) {}
 
-    await connection.beginTransaction();
-
-    await connection.query(`
-      UPDATE tickets SET ${updates.join(', ')}, updated_at = NOW() WHERE ticket_id = ?
-    `, [...params, id]);
-
-    // Audit log
-    await connection.query(`
-      INSERT INTO audit_logs (
-        log_id, ticket_id, actor_id, actor_name, actor_role, action, details
-      ) VALUES (?, ?, ?, ?, ?, 'UPDATE_TICKET', ?)
-    `, [
-      `LOG-${Date.now().toString().slice(-6)}`, id, user ? user.user_id : 'STAFF',
-      user ? user.name : 'Staff Helpdesk', user ? user.role : 'operator', changeLogs.join('; ')
-    ]);
-
-    await connection.commit();
-
-    const [updated] = await connection.query('SELECT * FROM tickets WHERE ticket_id = ?', [id]);
+    const [updatedTicket] = await pool.query('SELECT * FROM tickets WHERE ticket_id = ?', [id]);
 
     return res.status(200).json({
       status: 'success',
       message: 'Status tiket berhasil diperbarui.',
-      data: updated[0]
+      data: {
+        ticket: {
+          ...updatedTicket[0],
+          is_archived: Boolean(updatedTicket[0].is_archived)
+        }
+      }
     });
   } catch (err) {
-    await connection.rollback();
     console.error('Error in updateTicketStatus:', err);
-    return res.status(500).json({
-      status: 'error',
-      code: 500,
-      message: 'Gagal memperbarui status tiket.'
-    });
-  } finally {
-    connection.release();
+    return res.status(500).json({ status: 'error', code: 500, message: 'Gagal memperbarui status tiket.' });
   }
 }
 
 export async function addThreadMessage(req, res) {
   try {
-    const user = req.user;
     const { id } = req.params;
-    const {
-      message,
-      visibility = 'public',
-      sender_name,
-      sender_id,
-      sender_role
-    } = req.body;
+    const { message, visibility = 'public' } = req.body;
+    const user = req.user;
 
-    const cleanMsg = (message || '').trim();
-    if (!cleanMsg) {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Pesan obrolan tidak boleh kosong.'
-      });
+    if (!message || !message.trim()) {
+      return res.status(400).json({ status: 'error', code: 400, message: 'Isi pesan tidak boleh kosong.' });
     }
 
     const [ticketRows] = await pool.query('SELECT * FROM tickets WHERE ticket_id = ? LIMIT 1', [id]);
@@ -513,58 +541,55 @@ export async function addThreadMessage(req, res) {
       return res.status(404).json({ status: 'error', code: 404, message: 'Tiket tidak ditemukan.' });
     }
 
-    const isCustomer = (user && user.role === 'pengguna_umum') || sender_role === 'pengguna_umum' || !user;
-    let finalVisibility = visibility.toLowerCase() === 'internal' ? 'internal' : 'public';
+    const ticket = ticketRows[0];
 
-    // General user cannot post internal notes
-    if (isCustomer) {
+    // Pelapor / UPT_LUAR checks: can only reply to own ticket or same office, and cannot post internal notes
+    let finalVisibility = visibility;
+    const isPelapor = user && (user.role === 'UPT_LUAR' || user.role === 'PELAPOR' || user.role === 'pengguna_umum');
+    if (isPelapor) {
+      const isOwn = (ticket.requester_email && user.email && ticket.requester_email.toLowerCase() === user.email.toLowerCase()) ||
+                    (ticket.requester_name && user.name && ticket.requester_name.toLowerCase() === user.name.toLowerCase());
+      const isSameOffice = user.office_id && ticket.office_id && user.office_id === ticket.office_id;
+
+      if (!isOwn && !isSameOffice) {
+        return res.status(403).json({ status: 'error', code: 403, message: 'Anda hanya dapat membalas tiket milik sendiri atau unit kantor Anda.' });
+      }
       finalVisibility = 'public';
     }
 
-    const finalSenderId = user ? user.user_id : (sender_id || 'USR-PUBLIC');
-    const finalSenderName = user ? user.name : (sender_name || 'Pelapor');
-    const finalSenderRole = user ? user.role : 'pengguna_umum';
-
-    // Deduplication check: check if identical message was posted in the last 5 seconds
-    const [recent] = await pool.query(
-      'SELECT thread_id FROM threads WHERE ticket_id = ? AND sender_id = ? AND message = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 5 SECOND) LIMIT 1',
-      [id, finalSenderId, cleanMsg]
-    );
-
-    if (recent.length > 0) {
-      const [existingMsg] = await pool.query('SELECT * FROM threads WHERE thread_id = ?', [recent[0].thread_id]);
-      return res.status(200).json({
-        status: 'success',
-        message: 'Pesan sudah terkirim (idempotent).',
-        data: existingMsg[0]
-      });
-    }
-
+    const senderRole = user ? user.role : 'UPT_LUAR';
+    const senderName = user ? user.name : 'Pelapor Layanan';
+    const senderId = user ? user.user_id : 'PUBLIC';
     const threadId = `TH-${Date.now().toString().slice(-6)}`;
 
     await pool.query(`
-      INSERT INTO threads (
-        thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, [
-      threadId, id, finalSenderId, finalSenderName, finalSenderRole, cleanMsg, finalVisibility
-    ]);
+      INSERT INTO threads (thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [threadId, id, senderId, senderName, senderRole, message.trim(), finalVisibility]);
 
     await pool.query('UPDATE tickets SET updated_at = NOW() WHERE ticket_id = ?', [id]);
 
-    const [createdThread] = await pool.query('SELECT * FROM threads WHERE thread_id = ?', [threadId]);
+    // Audit Log
+    try {
+      await pool.query(`
+        INSERT INTO audit_logs (log_id, ticket_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
+        VALUES (?, ?, ?, ?, 'THREAD_REPLY', 'THREAD', ?, ?, ?)
+      `, [
+        `LOG-${Date.now().toString().slice(-6)}`, id, senderId, senderName, senderRole, threadId,
+        `Tanggapan baru (${visibility})`,
+        `Pesan baru dikirimkan pada tiket #${id}`
+      ]);
+    } catch (e) {}
+
+    const [newThread] = await pool.query('SELECT * FROM threads WHERE thread_id = ?', [threadId]);
 
     return res.status(201).json({
       status: 'success',
-      message: 'Pesan berhasil dikirim.',
-      data: createdThread[0]
+      message: 'Pesan balasan berhasil terkirim.',
+      data: newThread[0]
     });
   } catch (err) {
     console.error('Error in addThreadMessage:', err);
-    return res.status(500).json({
-      status: 'error',
-      code: 500,
-      message: 'Gagal mengirim pesan obrolan.'
-    });
+    return res.status(500).json({ status: 'error', code: 500, message: 'Gagal mengirim pesan.' });
   }
 }

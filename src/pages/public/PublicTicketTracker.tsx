@@ -39,12 +39,12 @@ export const PublicTicketTracker: React.FC = () => {
   const paramId = searchParams.get('id') || '';
   const paramEmail = searchParams.get('email') || '';
 
-  const backDestination = isStaff ? '/dashboard' : user ? '/my-tickets' : '/';
+  const backDestination = isStaff ? '/dashboard' : user ? '/my-tickets' : '/login';
   const backLabel = isStaff 
     ? 'Dashboard Operator' 
     : user 
     ? 'Tiket Saya' 
-    : 'Beranda';
+    : 'Halaman Masuk';
 
   const [ticketId, setTicketId] = useState(paramId);
   const [email, setEmail] = useState(paramEmail);
@@ -119,7 +119,7 @@ export const PublicTicketTracker: React.FC = () => {
             `Pembaruan Status Tiket #${id}`,
             `Status tiket Anda telah diperbarui menjadi "${newStatusLabel}" oleh tim teknisi.`
           );
-          info(`📢 Status tiket diperbarui menjadi: ${newStatusLabel}`);
+          info(`Status tiket diperbarui menjadi: ${newStatusLabel}`);
         }
         prevTicketStatusRef.current = currentTicket.status;
         setTicket(currentTicket);
@@ -139,10 +139,10 @@ export const PublicTicketTracker: React.FC = () => {
               const cleanMsg = parseThreadMessage(latestMsg.message).cleanText;
               soundService.playIncomingMessageSound();
               soundService.notifyBrowser(
-                `💬 Balasan Baru dari ${staffName} (#${id})`,
+                `Balasan Baru dari ${staffName} (#${id})`,
                 cleanMsg.slice(0, 80)
               );
-              info(`💬 Tanggapan baru dari ${staffName}`);
+              info(`Tanggapan baru dari ${staffName}`);
               setLiveResponseAlert({
                 sender: staffName,
                 text: cleanMsg
@@ -197,7 +197,7 @@ export const PublicTicketTracker: React.FC = () => {
           const cleanMsg = parseThreadMessage(newMsg.message).cleanText;
           soundService.playIncomingMessageSound();
           soundService.notifyBrowser(
-            `💬 Tanggapan Baru dari ${staffName} (#${ticket.ticket_id})`,
+            `Tanggapan Baru dari ${staffName} (#${ticket.ticket_id})`,
             cleanMsg.slice(0, 80)
           );
           setLiveResponseAlert({
@@ -475,9 +475,20 @@ export const PublicTicketTracker: React.FC = () => {
                   </div>
 
                   <h2 className="text-[18px] font-bold text-[#0F172A] leading-snug">{ticket.subject}</h2>
-                  <p className="text-[13px] text-[#64748B] mt-1">
-                    {parsedTicket.departmentAndTopic || ticket.category} · {parsedTicket.location || 'Seluruh Lokasi'}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[12px] text-[#64748B]">
+                    <span className="font-semibold text-[#0D5C75] bg-[#EAF4F8] px-2 py-0.5 rounded-md">
+                      {ticket.office_name || ticket.office_id || 'KCU Bandung'}
+                    </span>
+                    <span>•</span>
+                    <span>{ticket.region_name || ticket.region_code || 'Regional 3'}</span>
+                    <span>•</span>
+                    <span>Pelapor: <strong className="text-slate-700">{ticket.requester_name}</strong></span>
+                    {ticket.requester_nip && (
+                      <span className="text-[11px] font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                        NOPEN: {ticket.requester_nip}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <SlaCountdown

@@ -1,50 +1,129 @@
 ================================================================================
-          DAFTAR AKUN LOGIN SISTEM HELPDESK TICKETING POSO
+          DAFTAR AKUN LOGIN SISTEM HELPDESK TICKETING PRISMA POS
 ================================================================================
 
-Berikut adalah data akun default untuk masuk ke dalam aplikasi:
+Berikut adalah daftar akun demo resmi PRISMA POS berdasarkan 3 Peran Bisnis Utama (Final):
+1. ADMIN        : Super Administrator (Full Control, Manajemen Akses, User, Sistem & Audit)
+2. PETUGAS_UPT  : Petugas UPT Pusat Helpdesk (Triase, Balas, Ubah Status, Selesaikan & Tutup Tiket)
+3. UPT_LUAR     : Staf / Pelapor Unit Kantor Cabang / Regional (Buat Tiket, Komunikasi, Scope Office)
 
 --------------------------------------------------------------------------------
-1. ADMINISTRATOR SISTEM
+1. ADMIN (Super Administrator) — GLOBAL SCOPE
 --------------------------------------------------------------------------------
-Email       : admin@poso.local
-Password    : Admin123!
-Role        : Administrator
-Hak Akses   : Akses penuh ke seluruh menu, manajemen pengguna & role, 
-              integrasi basis data cloud Aiven MySQL, dan pengaturan sistem.
+Email          : admin@poso.local
+Password       : Admin123!
+Role           : ADMIN (alias: ADMIN_PUSAT / admin)
+Kantor / Unit  : Kantor Pusat Pengendalian Operasi (OFC-PUSAT), Regional Pusat (REG-PUSAT)
+Data Scope     : GLOBAL (Akses penuh ke seluruh data tiket & pengguna nasional)
+Hak Akses      : Full Permissions, Manajemen Pengguna, Persetujuan Registrasi (/admin/approvals),
+                 Matriks Hak Akses Granular (Override), Audit Log Forensik, & Reset MFA.
 
 --------------------------------------------------------------------------------
-2. OPERATOR HELPDESK
+2. PETUGAS_UPT (Petugas Helpdesk UPT Pusat) — GLOBAL SCOPE
 --------------------------------------------------------------------------------
-Email       : operator@poso.local
-Password    : Operator123!
-Role        : Operator Helpdesk
-Hak Akses   : Triase tiket, delegasi tiket ke unit UPT, chat langsung 
-              dengan pelapor, monitoring SLA dan status tiket.
+Email          : operator@poso.local
+Password       : Operator123!
+Role           : PETUGAS_UPT (alias: OPERATOR / operator / upt)
+Kantor / Unit  : Kantor Pusat Pengendalian Operasi (OFC-PUSAT), Regional Pusat (REG-PUSAT)
+Jabatan        : Petugas Helpdesk & Triase
+Data Scope     : GLOBAL (Memproses tiket seluruh Indonesia secara nasional)
+Hak Akses      : Triase tiket nasional, klaim/penugasan tiket, ubah status tiket (in_progress,
+                 waiting, closed), resolusi tiket, tutup tiket, komunikasi dua arah, & monitoring SLA.
 
 --------------------------------------------------------------------------------
-3. STAF UPT TI & SISTEM INFORMASI
+3. PETUGAS_UPT (Petugas UPT TI & Jaringan Pusat) — GLOBAL SCOPE
 --------------------------------------------------------------------------------
-Email       : upt.ti@poso.local
-Password    : Poso123!
-Role        : UPT Unit
-Unit Kerja  : UPT TI & Sistem Informasi (TI & Jaringan)
-Hak Akses   : Menangani dan memperbarui status tiket yang ditugaskan 
-              ke unit TI & Sistem Informasi, memberikan catatan penanganan.
+Email          : upt.ti@poso.local
+Password       : Poso123!
+Role           : PETUGAS_UPT
+Kantor / Unit  : Kantor Pusat (OFC-PUSAT), Regional Pusat (REG-PUSAT)
+UPT Unit       : UPT TI & Sistem Informasi
+Data Scope     : GLOBAL (Penanganan teknis kendala TI, server, jaringan LAN/VPN nasional)
+Hak Akses      : Investigasi tiket TI, ubah status tiket, tutup tiket, catatan internal staf (🔒).
 
 --------------------------------------------------------------------------------
-4. STAF UPT SARANA & PRASARANA (CGS)
+4. PETUGAS_UPT (Petugas UPT Sarpras / CGS Pusat) — GLOBAL SCOPE
 --------------------------------------------------------------------------------
-Email       : upt.sarpras@poso.local
-Password    : Poso123!
-Role        : UPT Unit
-Unit Kerja  : UPT Sarana & Prasarana (CGS)
-Hak Akses   : Menangani dan memperbarui status tiket yang ditugaskan 
-              ke unit Sarana & Prasarana (CGS).
+Email          : upt.sarpras@poso.local
+Password       : Poso123!
+Role           : PETUGAS_UPT
+Kantor / Unit  : Kantor Pusat (OFC-PUSAT), Regional Pusat (REG-PUSAT)
+UPT Unit       : UPT Sarana & Prasarana (CGS)
+Data Scope     : GLOBAL (Penanganan teknis fasilitas gedung, armada, kelistrikan & AC)
+Hak Akses      : Investigasi tiket sarpras, ubah status tiket, tutup tiket, catatan internal staf (🔒).
+
+--------------------------------------------------------------------------------
+5. UPT_LUAR (Staf Operasional KCU Bandung) — OFFICE SCOPE
+--------------------------------------------------------------------------------
+Email          : andi.cabang@poso.local
+Password       : Poso123!
+Role           : UPT_LUAR
+Kantor / Unit  : KCU Bandung (OFC-KCU-BDG), Regional 3 Jabar & Banten (REG-03)
+Jabatan        : Staf Operasional KCU Bandung
+Data Scope     : OFFICE (Melihat dan merespons tiket miliknya dan tiket satu kantor KCU Bandung)
+Hak Akses      : Buat tiket baru, pantau tiket kantor sendiri, kirim balasan percakapan publik.
+ATURAN BISNIS  : UPT_LUAR TIDAK DAPAT menutup tiket atau mengubah status tiket (wewenang Pusat).
+
+--------------------------------------------------------------------------------
+6. UPT_LUAR (Supervisor Layanan Regional 3) — OFFICE SCOPE
+--------------------------------------------------------------------------------
+Email          : budi.regional3@poso.local
+Password       : Poso123!
+Role           : UPT_LUAR
+Kantor / Unit  : Regional Office 3 (REG-03 / OFC-KCU-BDG)
+Jabatan        : Supervisor Layanan Regional 3
+Data Scope     : OFFICE (Melihat dan merespons tiket miliknya dan tiket satu kantornya)
+Hak Akses      : Buat tiket baru, pantau tiket kantor sendiri, kirim balasan percakapan publik.
+ATURAN BISNIS  : UPT_LUAR TIDAK DAPAT menutup tiket atau mengubah status tiket (wewenang Pusat).
+
+--------------------------------------------------------------------------------
+7. UPT_LUAR (Pelapor Layanan / Eksternal) — OFFICE SCOPE
+--------------------------------------------------------------------------------
+Email          : dewi@gmail.com
+Password       : Poso123!
+Role           : UPT_LUAR
+Kantor / Unit  : KCU Bandung (OFC-KCU-BDG), Regional 3 (REG-03)
+Jabatan        : Pelapor Layanan Eksternal
+Data Scope     : OFFICE (Melihat dan merespons tiket yang diajukannya)
+Hak Akses      : Buat tiket baru, pantau tiket di portal Tiket Saya, kirim balasan publik.
+
+--------------------------------------------------------------------------------
+8. CONTOH USER REGISTRASI PENDING (Menunggu Persetujuan Admin)
+--------------------------------------------------------------------------------
+Email          : hendra.pending@poso.local
+Password       : Poso123!
+Role           : UPT_LUAR (Status Akun: PENDING)
+Kantor / Unit  : KC Cimahi (OFC-KC-CMH), Regional 3 (REG-03)
+Keterangan     : Belum dapat login sampai disetujui oleh ADMIN di menu
+                 "Persetujuan Registrasi" (/admin/approvals).
 
 ================================================================================
-* Catatan:
-- Seluruh password di atas bersifat Case-Sensitive (perhatikan huruf besar/kecil).
-- Pengguna umum/pelapor tamu dapat membuat tiket dan melacak tanpa login atau 
-  melakukan registrasi akun secara mandiri melalui menu 'Daftar Akun Baru'.
+* PANDUAN & ATURAN BISNIS SISTEM:
+1. ATURAN HAK AKSES TIKET (STRICT RESOLUTION RULE):
+   - Peran UPT_LUAR (seluruh staf kantor cabang/regional di luar kantor pusat)
+     HANYA memiliki hak membuat tiket, melihat tiket kantornya, dan membalas pesan.
+   - UPT_LUAR SAMA SEKALI TIDAK BISA mengubah status tiket atau menutup tiket.
+   - Penutupan tiket (status 'closed') dan perubahan status tiket (in_progress,
+     waiting) HANYA BISA DILAKUKAN oleh ADMIN dan PETUGAS_UPT di Kantor Pusat.
+
+2. ISOLASI DATA TINGKAT KANTOR (OFFICE DATA ISOLATION):
+   - Staf UPT_LUAR memiliki data scope OFFICE.
+   - Tiket yang dibuat oleh staf KCU Bandung hanya dapat dilihat oleh rekan-rekan
+     satu kantor di KCU Bandung, serta ADMIN dan PETUGAS_UPT Pusat.
+   - Tiket tersebut TIDAK TERLIHAT oleh staf kantor cabang/regional lain.
+
+3. WORKFLOW REGISTRASI DINAS & PERSETUJUAN:
+   - Registrasi mandiri (/register) otomatis menghasilkan akun berstatus PENDING
+     dengan role UPT_LUAR dan data scope OFFICE.
+   - Akun tidak dapat digunakan login sebelum disetujui (APPROVED) oleh ADMIN
+     di workstation menu "Persetujuan Registrasi".
+
+4. MULTI-FACTOR AUTHENTICATION (MFA / 2FA TOTP):
+   - Sistem mendukung otentikasi dua faktor berbasis kode OTP TOTP.
+   - Jika pengguna kehilangan akses OTP, ADMIN dapat melakukan "Reset MFA"
+     secara instan melalui menu "Manajemen Staf & Hak Akses".
+
+5. MATRIKS HAK AKSES GRANULAR (OVERRIDE PERMISSION):
+   - ADMIN dapat mengubah izin individual staf secara granular (ALLOW / DENY /
+     INHERIT) melalui laci "Kelola Hak Akses" di tabel Manajemen Staf.
 ================================================================================

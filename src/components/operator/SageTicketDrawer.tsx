@@ -13,6 +13,7 @@ import {
   ChevronDown, 
   User, 
   MapPin, 
+  Building2,
   Clock, 
   AlertCircle,
   CheckCircle2,
@@ -58,8 +59,30 @@ export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
   onStatusChange,
   onTicketUpdated
 }) => {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { success, error: toastError, info } = useToast();
+
+  const isPelapor = user?.role === 'UPT_LUAR' || user?.role === 'PELAPOR' || user?.role === 'pengguna_umum' || user?.role === 'USER_CABANG' || user?.role === 'USER_REGIONAL';
+  const canChangeStatus = !isPelapor && Boolean(
+    user?.role === 'ADMIN' || 
+    user?.role === 'PETUGAS_UPT' || 
+    user?.role === 'ADMIN_PUSAT' || 
+    user?.role === 'OPERATOR' ||
+    user?.role === 'admin' ||
+    user?.role === 'operator' ||
+    user?.role === 'upt' ||
+    hasPermission('ticket.change_status') ||
+    hasPermission('ticket.resolve') ||
+    hasPermission('ticket.close')
+  );
+  const canTriage = !isPelapor && Boolean(
+    user?.role === 'ADMIN' || 
+    user?.role === 'PETUGAS_UPT' || 
+    user?.role === 'ADMIN_PUSAT' || 
+    user?.role === 'OPERATOR' ||
+    hasPermission('ticket.triage') ||
+    hasPermission('ticket.assign')
+  );
   
   const [activeTab, setActiveTab] = useState<'diskusi' | 'triase' | 'info'>('diskusi');
   const [isInternal, setIsInternal] = useState(false);
@@ -139,7 +162,7 @@ export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
             if (!isFromSelf) {
               soundService.playIncomingMessageSound();
               soundService.notifyBrowser(`Pesan Baru di #${ticketId}`, `${latestMsg.sender_name || 'Pelapor'}: ${(latestMsg.message || '').slice(0, 60)}`);
-              info(`💬 Pesan baru dari ${latestMsg.sender_name || 'Pelapor'}`);
+              info(`Pesan baru dari ${latestMsg.sender_name || 'Pelapor'}`);
             }
           }
         }
@@ -168,7 +191,7 @@ export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
     if (!ticket || !replyText.trim() || isSending) return;
 
     const outgoingMessage = replyText.trim();
-    const isNote = isInternal;
+    const isNote = !isPelapor && isInternal;
     setIsSending(true);
     setReplyText('');
 
@@ -315,28 +338,37 @@ export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[11px] font-bold bg-[#ECFDF5] text-[#059669] border border-[#A7F3D0]">
                       <CheckCircle2 size={13} /> Tiket Selesai (Otomatis Masuk Arsip)
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => onStatusChange(ticket, 'in_progress')}
-                      className="flex items-center gap-1.5 px-3 py-1 rounded-[6px] text-[11px] font-bold bg-[#EFF6FF] border border-[#BAE6FD] text-[#0284C7] hover:bg-[#0284C7] hover:text-white transition-all cursor-pointer shadow-2xs"
-                      title="Buka kembali tiket ini ke antrean kerja aktif"
-                    >
-                      <RotateCcw size={12} />
-                      <span>Buka Kembali Tiket</span>
-                    </button>
+                    {canChangeStatus && (
+                      <button
+                        type="button"
+                        onClick={() => onStatusChange(ticket, 'in_progress')}
+                        className="flex items-center gap-1.5 px-3 py-1 rounded-[6px] text-[11px] font-bold bg-[#EFF6FF] border border-[#BAE6FD] text-[#0284C7] hover:bg-[#0284C7] hover:text-white transition-all cursor-pointer shadow-2xs"
+                        title="Buka kembali tiket ini ke antrean kerja aktif"
+                      >
+                        <RotateCcw size={12} />
+                        <span>Buka Kembali Tiket</span>
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <>
-                    <span className="text-[11px] font-semibold text-[#64748B]">Ubah Status:</span>
-                    {nextStatuses.map((st) => (
-                      <button
-                        key={st}
-                        onClick={() => onStatusChange(ticket, st)}
-                        className="px-2.5 py-1 rounded-[6px] text-[11px] font-bold bg-white border border-[#E2E8F0] text-[#0D5C75] hover:bg-[#0D5C75] hover:text-white transition-all cursor-pointer"
-                      >
-                        → {statusLabels[st]}
-                      </button>
-                    ))}
+                    <span className="text-[11px] font-semibold text-[#64748B]">Status:</span>
+                    {canChangeStatus ? (
+                      <>
+                        <span className="text-[11px] font-semibold text-[#64748B]">Ubah ke:</span>
+                        {nextStatuses.map((st) => (
+                          <button
+                            key={st}
+                            onClick={() => onStatusChange(ticket, st)}
+                            className="px-2.5 py-1 rounded-[6px] text-[11px] font-bold bg-white border border-[#E2E8F0] text-[#0D5C75] hover:bg-[#0D5C75] hover:text-white transition-all cursor-pointer"
+                          >
+                            → {statusLabels[st]}
+                          </button>
+                        ))}
+                      </>
+                    ) : (
+                      <StatusBadge status={ticket.status} />
+                    )}
                   </>
                 )}
               </div>
@@ -352,7 +384,7 @@ export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
             <div className="flex border-b border-[#E2E8F0] px-5 flex-shrink-0 bg-white">
               {[
                 { id: 'diskusi', label: 'Diskusi & Balasan', icon: MessageSquare },
-                { id: 'triase', label: 'Triase & Delegasi', icon: GitBranch },
+                ...(canTriage ? [{ id: 'triase', label: 'Triase & Delegasi', icon: GitBranch }] : []),
                 { id: 'info', label: 'Info & SLA', icon: Info },
               ].map(({ id, label, icon: Icon }) => (
                 <button
@@ -382,6 +414,23 @@ export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
                       <span>Laporan Awal: {ticket.requester_name || 'Pelapor'}</span>
                       <span>{new Date(ticket.created_at).toLocaleDateString('id-ID')}</span>
                     </div>
+
+                    {/* Office and Region Badges */}
+                    <div className="flex items-center gap-1.5 flex-wrap py-0.5">
+                      {ticket.office_name && (
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-bold bg-[#F1F5F9] text-[#0D5C75] border border-[#CBD5E1]">
+                          <Building2 size={12} className="text-[#0D5C75] shrink-0" />
+                          <span>{ticket.office_name}</span>
+                        </span>
+                      )}
+                      {(ticket.region_name || ticket.region_code || ticket.region_id) && (
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-bold bg-[#EAF4F8] text-[#199FB1] border border-[#199FB1]/30">
+                          <MapPin size={12} className="text-[#199FB1] shrink-0" />
+                          <span>{ticket.region_name || ticket.region_code || ticket.region_id}</span>
+                        </span>
+                      )}
+                    </div>
+
                     <h4 className="text-[13px] font-bold text-[#0F172A]">{ticket.subject}</h4>
                     <p className="text-[12px] text-slate-700 whitespace-pre-wrap leading-relaxed">
                       {parsedTicket.cleanDescription || ticket.description}
@@ -518,6 +567,20 @@ export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
                     </div>
 
                     <div className="flex justify-between py-1 border-b border-[#E2E8F0]">
+                      <span className="text-[#64748B]">Wilayah Regional:</span>
+                      <span className="font-semibold text-[#0D5C75]">
+                        {ticket.region_name ? `${ticket.region_name} (${ticket.region_code || ticket.region_id})` : ticket.region_id || '-'}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between py-1 border-b border-[#E2E8F0]">
+                      <span className="text-[#64748B]">Kantor Cabang:</span>
+                      <span className="font-semibold text-[#0D5C75]">
+                        {ticket.office_name ? `${ticket.office_name} (${ticket.office_code || ticket.office_id})` : ticket.office_id || '-'}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between py-1 border-b border-[#E2E8F0]">
                       <span className="text-[#64748B]">Lokasi Penempatan:</span>
                       <span className="font-semibold text-[#0F172A]">{parsedTicket.location || 'Semua Cabang'}</span>
                     </div>
@@ -542,17 +605,22 @@ export const SageTicketDrawer: React.FC<SageTicketDrawerProps> = ({
               <form onSubmit={handleSendReply} className="p-4 border-t border-[#E2E8F0] bg-white flex-shrink-0 space-y-2.5">
                 <div className="flex items-center justify-between">
                   {/* Internal Note Toggle */}
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={isInternal}
-                      onChange={(e) => setIsInternal(e.target.checked)}
-                      className="rounded text-[#D97706] focus:ring-[#D97706]"
-                    />
-                    <span className={`text-[12px] font-bold ${isInternal ? 'text-[#D97706]' : 'text-[#64748B]'}`}>
-                      🔒 Catatan Internal (Hanya Staf/UPT)
-                    </span>
-                  </label>
+                  {!isPelapor ? (
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={isInternal}
+                        onChange={(e) => setIsInternal(e.target.checked)}
+                        className="rounded text-[#D97706] focus:ring-[#D97706]"
+                      />
+                      <span className={`text-[12px] font-bold inline-flex items-center gap-1.5 ${isInternal ? 'text-[#D97706]' : 'text-[#64748B]'}`}>
+                        <Lock size={12} className="shrink-0" />
+                        <span>Catatan Internal (Hanya Staf/UPT)</span>
+                      </span>
+                    </label>
+                  ) : (
+                    <span className="text-[12px] font-medium text-[#64748B]">Tanggapan tiket akan diteruskan ke Petugas UPT Pusat</span>
+                  )}
 
                   <span className="text-[10px] text-[#94A3B8]">Tekan Kirim</span>
                 </div>

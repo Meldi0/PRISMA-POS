@@ -29,7 +29,7 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   private handleGoHome = () => {
-    window.location.href = '/';
+    window.location.href = '/login';
   };
 
   public render() {
@@ -58,7 +58,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 onClick={this.handleGoHome}
                 className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200 transition-colors cursor-pointer"
               >
-                <Home size={14} /> Kembali ke Beranda
+                <Home size={14} /> Kembali ke Halaman Masuk
               </button>
             </div>
           </div>

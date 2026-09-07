@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import { apiService } from '../../services/api';
-import { TicketPriority } from '../../types';
+import { TicketPriority, Region, Office } from '../../types';
+import { SearchableSelect } from '../../components/common/SearchableSelect';
 import { 
   Send, 
   AlertCircle, 
@@ -130,19 +131,24 @@ export const PublicTicketForm: React.FC = () => {
   const { success, error, info } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const backDestination = isStaff ? '/dashboard' : user ? '/my-tickets' : '/';
+  const backDestination = isStaff ? '/dashboard' : user ? '/my-tickets' : '/login';
   const backLabel = isStaff 
     ? 'Kembali ke Dashboard' 
     : user 
     ? 'Kembali ke Tiket Saya' 
-    : 'Kembali ke Beranda';
+    : 'Kembali ke Halaman Masuk';
 
   // Form State
   const [requesterName, setRequesterName] = useState(user?.name || '');
   const [requesterEmail, setRequesterEmail] = useState(user?.email || '');
+  const [requesterNip, setRequesterNip] = useState(user?.nip || user?.nopen_kc || '');
   const [selectedDepartmentId, setSelectedDepartmentId] = useState<string>(CASCADING_DEPARTMENTS[0].id);
   const [selectedTopic, setSelectedTopic] = useState<string>(CASCADING_DEPARTMENTS[0].topics[0].label);
   const [priority, setPriority] = useState<TicketPriority>('Medium');
+  const [regions, setRegions] = useState<Region[]>([]);
+  const [offices, setOffices] = useState<Office[]>([]);
+  const [selectedRegionId, setSelectedRegionId] = useState<string>(user?.region_id || 'REG-03');
+  const [selectedOfficeId, setSelectedOfficeId] = useState<string>(user?.office_id || 'OFC-KCU-BDG');
   const [workLocation, setWorkLocation] = useState<string>('');
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
@@ -155,11 +161,35 @@ export const PublicTicketForm: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [copiedId, setCopiedId] = useState(false);
 
+  // Fetch Regions & Offices
+  useEffect(() => {
+    apiService.getRegions().then(res => {
+      if (res.status === 'success' && res.data) {
+        setRegions(res.data);
+      }
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (selectedRegionId) {
+      apiService.getOffices(selectedRegionId).then(res => {
+        if (res.status === 'success' && res.data) {
+          setOffices(res.data);
+          if (!res.data.some(o => o.office_id === selectedOfficeId)) {
+            setSelectedOfficeId(res.data[0]?.office_id || '');
+          }
+        }
+      }).catch(() => {});
+    }
+  }, [selectedRegionId]);
+
   // Pre-fill user data
   useEffect(() => {
     if (user) {
       setRequesterName(user.name);
       setRequesterEmail(user.email);
+      if (user.region_id) setSelectedRegionId(user.region_id);
+      if (user.office_id) setSelectedOfficeId(user.office_id);
     }
   }, [user]);
 
@@ -181,6 +211,28 @@ export const PublicTicketForm: React.FC = () => {
   }, [searchParams]);
 
   const currentDepartment = CASCADING_DEPARTMENTS.find(d => d.id === selectedDepartmentId) || CASCADING_DEPARTMENTS[0];
+
+  const regionOptions = useMemo(
+    () =>
+      regions.map((reg) => ({
+        value: reg.region_id,
+        label: reg.name,
+        subLabel: `Kode: ${reg.code}`,
+        badge: reg.code,
+      })),
+    [regions]
+  );
+
+  const officeOptions = useMemo(
+    () =>
+      offices.map((off) => ({
+        value: off.office_id,
+        label: off.name,
+        subLabel: `Kode: ${off.code}`,
+        badge: off.type || 'KANTOR',
+      })),
+    [offices]
+  );
 
   const handleDepartmentChange = (newDeptId: string) => {
     setSelectedDepartmentId(newDeptId);
@@ -331,10 +383,13 @@ export const PublicTicketForm: React.FC = () => {
         department: currentDepartment.name,
         topic: selectedTopic,
         location: workLocation.trim(),
+        region_id: selectedRegionId,
+        office_id: selectedOfficeId,
         description: description.trim(),
         priority,
         requester_email: requesterEmail.trim().toLowerCase(),
         requester_name: requesterName.trim() || 'Pelapor',
+        requester_nip: requesterNip.trim() || user?.nip || undefined,
         assigned_upt: currentDepartment.uptUnit,
         attachments: attachments.map(a => ({
           name: a.name,
@@ -345,8 +400,13 @@ export const PublicTicketForm: React.FC = () => {
       });
 
       if (res.status === 'success' && res.data) {
-        setCreatedTicketId(res.data.ticket_id);
-        success(`Tiket #${res.data.ticket_id} berhasil diajukan!`);
+        const ticketIdFromRes = (res.data as any).ticket_id || (res.data as any).ticket?.ticket_id || (res.data as any).id;
+        if (ticketIdFromRes) {
+          setCreatedTicketId(ticketIdFromRes);
+          success(`Tiket #${ticketIdFromRes} berhasil diajukan!`);
+        } else {
+          setErrorMsg('Gagal mendapatkan nomor tiket dari server.');
+        }
       } else {
         setErrorMsg(res.message || 'Gagal mengirimkan laporan tiket.');
       }
@@ -464,7 +524,7 @@ export const PublicTicketForm: React.FC = () => {
           <form onSubmit={handleSubmit} className="lg:col-span-2 bg-white rounded-[16px] border border-[#E2E8F0]/80 shadow-[0_2px_8px_rgba(15,23,42,0.06)] p-6 space-y-5">
             
             {/* Requester Info */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-[13px] font-semibold text-[#0F172A] mb-1.5">
                   Nama Lengkap Pelapor <span className="text-[#EF4444]">*</span>
@@ -472,9 +532,22 @@ export const PublicTicketForm: React.FC = () => {
                 <input
                   type="text"
                   required
-                  placeholder="Nama pelapor"
+                  placeholder="Nama pelapor dinas"
                   value={requesterName}
                   onChange={(e) => setRequesterName(e.target.value)}
+                  className="w-full h-11 px-3.5 rounded-[10px] border border-[#E2E8F0] text-[14px] text-[#0F172A] placeholder-[#CBD5E1] focus:outline-none focus:ring-2 focus:ring-[#199FB1]/30 focus:border-[#199FB1] transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[13px] font-semibold text-[#0F172A] mb-1.5">
+                  NIP / NOPEN Dinas
+                </label>
+                <input
+                  type="text"
+                  placeholder="NIP / Nopen (Cth: 1994...)"
+                  value={requesterNip}
+                  onChange={(e) => setRequesterNip(e.target.value)}
                   className="w-full h-11 px-3.5 rounded-[10px] border border-[#E2E8F0] text-[14px] text-[#0F172A] placeholder-[#CBD5E1] focus:outline-none focus:ring-2 focus:ring-[#199FB1]/30 focus:border-[#199FB1] transition-all"
                 />
               </div>
@@ -568,10 +641,44 @@ export const PublicTicketForm: React.FC = () => {
               </div>
             </div>
 
+            {/* Wilayah Regional & Kantor Cabang / Kantor Pos */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-[12px] bg-[#F8FAFC] border border-[#E2E8F0]">
+              <div>
+                <label className="block text-[13px] font-semibold text-[#0F172A] mb-1.5">
+                  Wilayah Regional Pos <span className="text-[#EF4444]">*</span>
+                </label>
+                <SearchableSelect
+                  options={regionOptions}
+                  value={selectedRegionId}
+                  onChange={(val) => setSelectedRegionId(val)}
+                  placeholder="Pilih Wilayah Regional..."
+                  searchPlaceholder="Cari nama atau kode regional..."
+                  required
+                />
+                <p className="text-[11px] text-[#64748B] mt-1">Menentukan regional pemantau tiket</p>
+              </div>
+
+              <div>
+                <label className="block text-[13px] font-semibold text-[#0F172A] mb-1.5">
+                  Kantor Cabang / Kantor Pos <span className="text-[#EF4444]">*</span>
+                </label>
+                <SearchableSelect
+                  options={officeOptions}
+                  value={selectedOfficeId}
+                  onChange={(val) => setSelectedOfficeId(val)}
+                  placeholder="Pilih Kantor Cabang / KC..."
+                  searchPlaceholder="Cari nama cabang, tipe (KCU/KC), kode..."
+                  emptyMessage="Tidak ada kantor cabang ditemukan pada regional ini"
+                  required
+                />
+                <p className="text-[11px] text-[#64748B] mt-1">Cari cepat cabang pelaksana penanganan</p>
+              </div>
+            </div>
+
             {/* Work Location */}
             <div>
               <label className="block text-[13px] font-semibold text-[#0F172A] mb-1.5">
-                Lokasi Kerja / Ruangan / Unit Kantor <span className="text-[#EF4444]">*</span>
+                Lokasi Spesifik / Ruangan / Unit Kerja <span className="text-[#EF4444]">*</span>
               </label>
               <input
                 type="text"

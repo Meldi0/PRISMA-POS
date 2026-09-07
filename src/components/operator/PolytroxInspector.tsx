@@ -18,7 +18,8 @@ import {
   Image as ImageIcon,
   MessageSquare,
   Sparkles,
-  ChevronRight
+  ChevronRight,
+  Save
 } from 'lucide-react';
 
 interface PolytroxInspectorProps {
@@ -292,9 +293,10 @@ export const PolytroxInspector: React.FC<PolytroxInspectorProps> = ({
             type="button"
             onClick={handleSaveTriage}
             disabled={isSubmitting}
-            className="w-full py-3 px-4 rounded-2xl bg-[#E75A38] hover:bg-[#D84623] text-white text-xs font-extrabold shadow-terracotta transition-all active:scale-95 disabled:opacity-50"
+            className="w-full py-3 px-4 rounded-2xl bg-[#E75A38] hover:bg-[#D84623] text-white text-xs font-extrabold shadow-terracotta transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {isSubmitting ? 'Menyimpan...' : '🚀 Simpan Perubahan Triase'}
+            <Save size={14} />
+            <span>{isSubmitting ? 'Menyimpan...' : 'Simpan Perubahan Triase'}</span>
           </button>
         </div>
 
@@ -343,7 +345,10 @@ export const PolytroxInspector: React.FC<PolytroxInspectorProps> = ({
                   return (
                     <div key={t.thread_id} className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 space-y-1">
                       <div className="flex items-center justify-between text-[10px] font-bold text-amber-700">
-                        <span>🔒 CATATAN INTERNAL ({t.sender_name})</span>
+                        <span className="inline-flex items-center gap-1">
+                          <Lock size={11} />
+                          <span>CATATAN INTERNAL ({t.sender_name})</span>
+                        </span>
                         <span>{new Date(t.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
                       <p className="whitespace-pre-wrap">{parsedMsg.cleanText}</p>
@@ -383,24 +388,26 @@ export const PolytroxInspector: React.FC<PolytroxInspectorProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveReplyTab('reply')}
-                className={`px-4 py-2 text-xs font-bold border-b-2 transition-all ${
+                className={`px-4 py-2 text-xs font-bold border-b-2 transition-all inline-flex items-center gap-1.5 ${
                   activeReplyTab === 'reply'
                     ? 'border-[#E75A38] text-[#E75A38]'
                     : 'border-transparent text-[#8C847E]'
                 }`}
               >
-                💬 Balas Pelapor (Publik)
+                <MessageSquare size={13} />
+                <span>Balas Pelapor (Publik)</span>
               </button>
               <button
                 type="button"
                 onClick={() => setActiveReplyTab('internal_note')}
-                className={`px-4 py-2 text-xs font-bold border-b-2 transition-all ${
+                className={`px-4 py-2 text-xs font-bold border-b-2 transition-all inline-flex items-center gap-1.5 ${
                   activeReplyTab === 'internal_note'
                     ? 'border-amber-600 text-amber-700'
                     : 'border-transparent text-[#8C847E]'
                 }`}
               >
-                🔒 Catatan Internal (Privat)
+                <Lock size={13} />
+                <span>Catatan Internal (Privat)</span>
               </button>
             </div>
 
@@ -439,9 +446,10 @@ export const PolytroxInspector: React.FC<PolytroxInspectorProps> = ({
                   <button
                     type="submit"
                     disabled={isSubmitting || !internalNoteText.trim()}
-                    className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-md disabled:opacity-50"
+                    className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-md disabled:opacity-50 inline-flex items-center gap-1.5"
                   >
-                    Simpan Catatan Privat 🔒
+                    <Lock size={13} />
+                    <span>Simpan Catatan Privat</span>
                   </button>
                 </div>
               </form>

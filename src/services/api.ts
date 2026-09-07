@@ -4,7 +4,13 @@ import {
   ThreadMessage, 
   ApiResponse,
   TicketStatus,
-  TicketPriority
+  TicketPriority,
+  Region,
+  Office,
+  Role,
+  Permission,
+  RegistrationApproval,
+  AuditLogItem
 } from '../types';
 
 const STORAGE_KEYS = {
@@ -25,13 +31,12 @@ class PosoApiService {
   // -----------------------------------------------------------------------------------------------
 
   public getStoredToken(): string {
-    return sessionStorage.getItem(STORAGE_KEYS.AUTH_TOKEN) || localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN) || '';
+    return sessionStorage.getItem(STORAGE_KEYS.AUTH_TOKEN) || '';
   }
 
   public setStoredToken(token: string | null) {
     if (token) {
       sessionStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, token);
-      localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, token);
     } else {
       sessionStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
       localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
@@ -39,7 +44,7 @@ class PosoApiService {
   }
 
   public getStoredUser(): User | null {
-    const raw = sessionStorage.getItem(STORAGE_KEYS.AUTH_USER) || localStorage.getItem(STORAGE_KEYS.AUTH_USER);
+    const raw = sessionStorage.getItem(STORAGE_KEYS.AUTH_USER);
     if (raw) {
       try {
         return JSON.parse(raw);
@@ -52,7 +57,6 @@ class PosoApiService {
     if (user) {
       const json = JSON.stringify(user);
       sessionStorage.setItem(STORAGE_KEYS.AUTH_USER, json);
-      localStorage.setItem(STORAGE_KEYS.AUTH_USER, json);
     } else {
       sessionStorage.removeItem(STORAGE_KEYS.AUTH_USER);
       sessionStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
@@ -85,15 +89,51 @@ class PosoApiService {
         headers
       });
 
-      const data = await response.json();
+      // Safely read response as text first to handle empty responses (204/502/504) or non-JSON payloads
+      const rawText = await response.text();
+      let data: any = null;
+
+      if (rawText && rawText.trim().length > 0) {
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          // If response is not JSON (e.g. HTML error page or raw proxy text)
+          data = null;
+        }
+      }
 
       if (!response.ok) {
+        let errorMessage = data?.message;
+        if (!errorMessage) {
+          if (response.status === 502 || response.status === 503 || response.status === 504) {
+            errorMessage = 'Backend API PRISMA POS (Port 5001) tidak dapat dihubungi. Pastikan server backend sedang berjalan.';
+          } else if (response.status === 404) {
+            errorMessage = `Endpoint ${endpoint} tidak ditemukan di server backend.`;
+          } else if (rawText && rawText.length < 200 && !rawText.includes('<html')) {
+            errorMessage = rawText;
+          } else {
+            errorMessage = `Permintaan gagal dengan status HTTP ${response.status} (${response.statusText || 'Error'}).`;
+          }
+        }
+
         return {
           status: 'error',
           code: response.status,
-          message: data.message || `Request failed with status ${response.status}`,
-          data: data.data
+          message: errorMessage,
+          data: data?.data,
+          mfa_required: data?.mfa_required,
+          challenge_token: data?.challenge_token,
+          account_status: data?.account_status
         };
+      }
+
+      // If response is OK but body was empty (e.g. HTTP 204 or 200 without content)
+      if (!data) {
+        return {
+          status: 'success',
+          code: response.status,
+          message: 'Berhasil'
+        } as unknown as ApiResponse<T>;
       }
 
       return data;
@@ -102,7 +142,7 @@ class PosoApiService {
       return {
         status: 'error',
         code: 500,
-        message: err.message || 'Gagal terhubung ke backend server PRISMA POS.'
+        message: 'Gagal terhubung ke backend server PRISMA POS. Pastikan server lokal aktif di port 5001.'
       };
     }
   }
@@ -159,11 +199,42 @@ class PosoApiService {
   }
 
   // -----------------------------------------------------------------------------------------------
-  // AUTHENTICATION
+  // MASTER DATA ORGANISASI
   // -----------------------------------------------------------------------------------------------
 
-  async login(params: { email: string; password: string }): Promise<ApiResponse<{ token: string; user: User }>> {
-    const res = await this.request<{ token: string; user: User }>('/auth/login', {
+  async getRegions(): Promise<ApiResponse<Region[]>> {
+    return this.request<Region[]>('/regions', { method: 'GET' });
+  }
+
+  async getOffices(regionId?: string): Promise<ApiResponse<Office[]>> {
+    const q = regionId ? `?region_id=${encodeURIComponent(regionId)}` : '';
+    return this.request<Office[]>(`/offices${q}`, { method: 'GET' });
+  }
+
+  async getRoles(): Promise<ApiResponse<Role[]>> {
+    return this.request<Role[]>('/roles', { method: 'GET' });
+  }
+
+  // -----------------------------------------------------------------------------------------------
+  // AUTHENTICATION & MFA
+  // -----------------------------------------------------------------------------------------------
+
+  async login(params: { email: string; password: string }): Promise<ApiResponse<{ token?: string; user?: User }>> {
+    const res = await this.request<{ token?: string; user?: User }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(params)
+    });
+
+    if (res.status === 'success' && res.data?.token && res.data?.user) {
+      this.setStoredToken(res.data.token);
+      this.setStoredUser(res.data.user);
+    }
+
+    return res;
+  }
+
+  async verifyMfa(params: { challenge_token: string; otp_code: string }): Promise<ApiResponse<{ token: string; user: User }>> {
+    const res = await this.request<{ token: string; user: User }>('/auth/mfa/verify', {
       method: 'POST',
       body: JSON.stringify(params)
     });
@@ -176,18 +247,40 @@ class PosoApiService {
     return res;
   }
 
-  async register(params: { name: string; email: string; password: string }): Promise<ApiResponse<{ token: string; user: User }>> {
-    const res = await this.request<{ token: string; user: User }>('/auth/register', {
+  async resendMfa(params: { challenge_token: string }): Promise<ApiResponse<any>> {
+    return this.request('/auth/mfa/resend', {
       method: 'POST',
       body: JSON.stringify(params)
     });
+  }
 
-    if (res.status === 'success' && res.data) {
-      this.setStoredToken(res.data.token);
-      this.setStoredUser(res.data.user);
-    }
+  async setupMfa(): Promise<ApiResponse<{ secret: string; qr_uri: string; backup_codes: string[] }>> {
+    return this.request('/auth/mfa/setup', { method: 'POST' });
+  }
 
-    return res;
+  async confirmMfa(params: { code: string }): Promise<ApiResponse<any>> {
+    return this.request('/auth/mfa/confirm', {
+      method: 'POST',
+      body: JSON.stringify(params)
+    });
+  }
+
+  async register(params: {
+    name: string;
+    email: string;
+    password: string;
+    phone?: string;
+    position?: string;
+    nip?: string;
+    nopen?: string;
+    user_type?: string;
+    region_id?: string;
+    office_id?: string;
+  }): Promise<ApiResponse<{ user_id: string; account_status: string }>> {
+    return this.request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(params)
+    });
   }
 
   async getProfile(): Promise<ApiResponse<User>> {
@@ -241,12 +334,15 @@ class PosoApiService {
     department?: string;
     topic?: string;
     location?: string;
+    region_id?: string;
+    office_id?: string;
     description: string;
     priority?: TicketPriority;
     channel?: 'web' | 'email';
     requester_name?: string;
     requester_email?: string;
     requester_phone?: string;
+    requester_nip?: string;
     assigned_upt?: string;
     assigned_operator?: string;
     attachments?: Array<{ name: string; size?: string; type?: string; dataUrl?: string; url?: string }>;
@@ -263,6 +359,7 @@ class PosoApiService {
     priority?: TicketPriority;
     assigned_upt?: string;
     assigned_operator?: string;
+    note?: string;
     is_archived?: boolean | number;
   }): Promise<ApiResponse<Ticket>> {
     return this.request<Ticket>(`/tickets/${encodeURIComponent(payload.ticket_id)}/status`, {
@@ -310,7 +407,36 @@ class PosoApiService {
   }
 
   // -----------------------------------------------------------------------------------------------
-  // ADMIN USER MANAGEMENT
+  // ADMIN APPROVALS
+  // -----------------------------------------------------------------------------------------------
+
+  async getApprovals(params?: { status?: string; search?: string }): Promise<ApiResponse<RegistrationApproval[]>> {
+    const query = new URLSearchParams();
+    if (params) {
+      if (params.status) query.set('status', params.status);
+      if (params.search) query.set('search', params.search);
+    }
+    return this.request<RegistrationApproval[]>(`/admin/approvals${query.toString() ? `?${query.toString()}` : ''}`, {
+      method: 'GET'
+    });
+  }
+
+  async approveRegistration(id: string, payload: { role?: string; data_scope?: string; region_id?: string; office_id?: string } = {}): Promise<ApiResponse<any>> {
+    return this.request(`/admin/approvals/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async rejectRegistration(id: string, reason: string): Promise<ApiResponse<any>> {
+    return this.request(`/admin/approvals/${encodeURIComponent(id)}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason })
+    });
+  }
+
+  // -----------------------------------------------------------------------------------------------
+  // ADMIN USER MANAGEMENT & GRANULAR ACCESS
   // -----------------------------------------------------------------------------------------------
 
   async getUsers(): Promise<ApiResponse<User[]>> {
@@ -322,20 +448,17 @@ class PosoApiService {
     email: string;
     password?: string;
     role: any;
+    data_scope?: string;
+    region_id?: string;
+    office_id?: string;
+    position?: string;
     upt_unit?: string;
     nip?: string;
     department?: string;
+    phone_number?: string;
     role_title?: string;
     avatar_url?: string;
-    jabatan_fungsional?: string;
-    kantor_penempatan?: string;
-    phone_number?: string;
-    nopen_kc?: string;
-    nama_kc?: string;
-    nopen_kcu?: string;
-    nama_kcu?: string;
-    regional_code?: string;
-    regional_name?: string;
+    [key: string]: any;
   }): Promise<ApiResponse<User>> {
     return this.request<User>('/admin/users', {
       method: 'POST',
@@ -345,15 +468,47 @@ class PosoApiService {
 
   async updateUserRole(payload: {
     target_user_id: string;
+    name?: string;
+    role?: any;
     new_role?: any;
-    new_upt_unit?: string;
+    data_scope?: string;
+    region_id?: string;
+    office_id?: string;
+    position?: string;
+    account_status?: string;
     is_active?: boolean;
     reset_password?: string;
+    role_title?: string;
+    new_upt_unit?: string;
+    [key: string]: any;
   }): Promise<ApiResponse<User>> {
     return this.request<User>(`/admin/users/${encodeURIComponent(payload.target_user_id)}`, {
       method: 'PATCH',
       body: JSON.stringify(payload)
     });
+  }
+
+  async getUserPermissions(userId: string): Promise<ApiResponse<{ user: User; permissions: Permission[]; allowedCodes: string[] }>> {
+    return this.request(`/admin/users/${encodeURIComponent(userId)}/permissions`, { method: 'GET' });
+  }
+
+  async updateUserPermissions(userId: string, overrides: Array<{ permission_id: number; effect: 'ALLOW' | 'DENY' | 'INHERIT' }>): Promise<ApiResponse<any>> {
+    return this.request(`/admin/users/${encodeURIComponent(userId)}/permissions`, {
+      method: 'PUT',
+      body: JSON.stringify({ overrides })
+    });
+  }
+
+  async suspendUser(userId: string): Promise<ApiResponse<any>> {
+    return this.request(`/admin/users/${encodeURIComponent(userId)}/suspend`, { method: 'POST' });
+  }
+
+  async activateUser(userId: string): Promise<ApiResponse<any>> {
+    return this.request(`/admin/users/${encodeURIComponent(userId)}/activate`, { method: 'POST' });
+  }
+
+  async resetUserMfa(userId: string): Promise<ApiResponse<any>> {
+    return this.request(`/admin/users/${encodeURIComponent(userId)}/reset-mfa`, { method: 'POST' });
   }
 
   async deleteUser(userId: string): Promise<ApiResponse<boolean>> {
@@ -372,9 +527,11 @@ class PosoApiService {
   // ADMIN FEATURES & AUDIT
   // -----------------------------------------------------------------------------------------------
 
-  async getAuditLog(params?: { limit?: number }): Promise<ApiResponse<any[]>> {
-    const query = params?.limit ? `?limit=${params.limit}` : '';
-    return this.request<any[]>(`/admin/audit-logs${query}`, { method: 'GET' });
+  async getAuditLog(params?: { limit?: number; action?: string }): Promise<ApiResponse<AuditLogItem[]>> {
+    const query = new URLSearchParams();
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.action) query.set('action', params.action);
+    return this.request<AuditLogItem[]>(`/admin/audit-logs${query.toString() ? `?${query.toString()}` : ''}`, { method: 'GET' });
   }
 
   async getFeatureFlags(): Promise<ApiResponse<any>> {
@@ -389,7 +546,7 @@ class PosoApiService {
   }
 
   // -----------------------------------------------------------------------------------------------
-  // ANALYTICS
+  // ANALYTICS & MONITORING
   // -----------------------------------------------------------------------------------------------
 
   async getAnalytics(): Promise<ApiResponse<any>> {

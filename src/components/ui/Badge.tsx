@@ -56,15 +56,20 @@ export function PriorityBadge({ priority }: { priority: TicketPriority | string 
 }
 
 export function RoleBadge({ role }: { role: string }) {
-  const norm = String(role || 'operator').toLowerCase();
+  const norm = String(role || 'upt_luar').toLowerCase();
   const configs: Record<string, { bg: string; text: string; label: string }> = {
     admin: { bg: '#FDF4FF', text: '#9333EA', label: 'Admin' },
-    operator: { bg: '#EFF6FF', text: '#1D4ED8', label: 'Operator' },
-    upt: { bg: '#F0FDF4', text: '#15803D', label: 'Teknisi UPT' },
-    teknisi: { bg: '#F0FDF4', text: '#15803D', label: 'Teknisi' },
-    pengguna_umum: { bg: '#F8FAFC', text: '#475569', label: 'Pelapor' }
+    admin_pusat: { bg: '#FDF4FF', text: '#9333EA', label: 'Admin' },
+    petugas_upt: { bg: '#EFF6FF', text: '#1D4ED8', label: 'Petugas UPT Pusat' },
+    operator: { bg: '#EFF6FF', text: '#1D4ED8', label: 'Petugas UPT Pusat' },
+    upt: { bg: '#EFF6FF', text: '#1D4ED8', label: 'Petugas UPT Pusat' },
+    upt_luar: { bg: '#F0FDF4', text: '#15803D', label: 'UPT Luar' },
+    pelapor: { bg: '#F0FDF4', text: '#15803D', label: 'UPT Luar' },
+    user_cabang: { bg: '#F0FDF4', text: '#15803D', label: 'UPT Luar' },
+    user_regional: { bg: '#F0FDF4', text: '#15803D', label: 'UPT Luar' },
+    pengguna_umum: { bg: '#F0FDF4', text: '#15803D', label: 'UPT Luar' },
   };
-  const cfg = configs[norm] || configs.operator;
+  const cfg = configs[norm] || { bg: '#F0FDF4', text: '#15803D', label: 'UPT Luar' };
   return (
     <span
       style={{ backgroundColor: cfg.bg, color: cfg.text }}

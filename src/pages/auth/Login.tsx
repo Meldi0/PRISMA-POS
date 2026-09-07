@@ -1,62 +1,75 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useLocation, Link, useSearchParams } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import { 
   User, 
   Lock, 
+  Eye, 
+  EyeOff, 
+  AlertCircle,
+  ShieldCheck,
+  KeyRound,
+  Smartphone,
+  RotateCcw,
   Mail,
-  ArrowLeft, 
-  Headphones, 
-  AlertCircle
+  RefreshCw,
+  UserPlus
 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 
 export const Login: React.FC = () => {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const initialMode = searchParams.get('mode') === 'register' ? 'register' : 'login';
-  const [authMode, setAuthMode] = useState<'login' | 'register'>(initialMode);
-
   // Login Form States
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
 
-  // Register Form States
-  const [regName, setRegName] = useState('');
-  const [regEmail, setRegEmail] = useState('');
-  const [regPassword, setRegPassword] = useState('');
-  const [regConfirmPassword, setRegConfirmPassword] = useState('');
-  const [showRegPassword, setShowRegPassword] = useState(false);
+  // MFA Challenge States (Stage 2)
+  const [isMfaStep, setIsMfaStep] = useState(false);
+  const [challengeToken, setChallengeToken] = useState('');
+  const [maskedEmail, setMaskedEmail] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [resending, setResending] = useState(false);
 
   // General States
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const { login, register } = useAuth();
+  const { login, verifyMfa, resendMfa } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { success, error: toastError } = useToast();
 
   const from = (location.state as any)?.from?.pathname || '/dashboard';
 
+  // Cooldown countdown timer for resending OTP
   useEffect(() => {
-    const modeParam = searchParams.get('mode');
-    if (modeParam === 'register') {
-      setAuthMode('register');
-    } else if (modeParam === 'login') {
-      setAuthMode('login');
-    }
-  }, [searchParams]);
+    if (resendCooldown <= 0) return;
+    const interval = setInterval(() => {
+      setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [resendCooldown]);
 
-  const handleSwitchMode = (mode: 'login' | 'register') => {
-    setAuthMode(mode);
-    setErrorMsg('');
-    setSearchParams({ mode });
+  const redirectUserByRole = (role?: string) => {
+    const isStaffOperatorOrAdmin = [
+      'ADMIN', 'ADMIN_PUSAT', 'admin',
+      'OPERATOR', 'PETUGAS_UPT', 'operator', 'upt_pusat'
+    ].includes(role || '');
+
+    if (isStaffOperatorOrAdmin) {
+      const dest = (from && from !== '/' && from !== '/login' && from !== '/my-tickets') ? from : '/dashboard';
+      navigate(dest, { replace: true });
+    } else {
+      // Seluruh Pelapor & UPT Luar masuk ke portal tiket dinas
+      const dest = (from && from !== '/' && from !== '/login' && from !== '/dashboard') ? from : '/my-tickets';
+      navigate(dest, { replace: true });
+    }
   };
 
-  // Handle Login Submit
+  // Handle Login Submit (Step 1: Password Check -> Trigger OTP Challenge)
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -64,15 +77,21 @@ export const Login: React.FC = () => {
 
     try {
       const res = await login(email.trim(), password);
+      
+      // Case 1: MFA is required (Stage 2 OTP sent to email)
+      if (res.mfa_required && res.challenge_token) {
+        setChallengeToken(res.challenge_token);
+        setMaskedEmail(res.masked_email || email.trim());
+        setIsMfaStep(true);
+        setResendCooldown(60);
+        success(`Kredensial valid. Kode OTP telah dikirimkan ke email Anda.`);
+        return;
+      }
+
+      // Case 2: Direct Login Success
       if (res.success) {
-        success('Selamat datang kembali!');
-        const isStaffRole = res.role === 'admin' || res.role === 'operator' || res.role === 'upt';
-        if (isStaffRole) {
-          const dest = (from && from !== '/' && from !== '/login' && from !== '/my-tickets') ? from : '/dashboard';
-          navigate(dest, { replace: true });
-        } else {
-          navigate('/my-tickets', { replace: true });
-        }
+        success('Selamat datang kembali di PRISMA POS!');
+        redirectUserByRole(res.role);
       } else {
         const msg = res.message || 'Kombinasi email atau password salah.';
         setErrorMsg(msg);
@@ -87,35 +106,54 @@ export const Login: React.FC = () => {
     }
   };
 
-  // Handle Register Submit
-  const handleRegisterSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Handle Resend OTP
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0 || resending || !challengeToken) return;
+    setResending(true);
     setErrorMsg('');
 
-    if (regPassword !== regConfirmPassword) {
-      setErrorMsg('Konfirmasi password tidak cocok.');
-      return;
-    }
-
-    if (regPassword.length < 6) {
-      setErrorMsg('Password minimal 6 karakter.');
-      return;
-    }
-
-    setLoading(true);
-
     try {
-      const res = await register(regName.trim(), regEmail.trim().toLowerCase(), regPassword);
+      const res = await resendMfa(challengeToken);
       if (res.success) {
-        success('Pendaftaran akun berhasil! Anda langsung dialihkan.');
-        navigate('/my-tickets', { replace: true });
+        success('Kode OTP baru telah berhasil dikirimkan ke email Anda.');
+        setResendCooldown(60);
       } else {
-        const msg = res.message || 'Pendaftaran akun gagal.';
+        const msg = res.message || 'Gagal mengirim ulang kode OTP.';
         setErrorMsg(msg);
         toastError(msg);
       }
     } catch (err: any) {
-      const msg = err.message || 'Terjadi gangguan pendaftaran akun.';
+      const msg = err.message || 'Gagal mengirim ulang kode OTP.';
+      setErrorMsg(msg);
+      toastError(msg);
+    } finally {
+      setResending(false);
+    }
+  };
+
+  // Handle OTP MFA Submit (Step 2: Enter 6-digit OTP)
+  const handleMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpCode.trim()) {
+      setErrorMsg('Masukkan 6 digit kode OTP verifikasi.');
+      return;
+    }
+
+    setErrorMsg('');
+    setLoading(true);
+
+    try {
+      const res = await verifyMfa(challengeToken, otpCode.trim());
+      if (res.success) {
+        success('Verifikasi OTP berhasil! Mengalihkan ke portal Anda...');
+        redirectUserByRole(res.role);
+      } else {
+        const msg = res.message || 'Kode OTP verifikasi salah atau kedaluwarsa.';
+        setErrorMsg(msg);
+        toastError(msg);
+      }
+    } catch (err: any) {
+      const msg = err.message || 'Gagal memverifikasi kode OTP.';
       setErrorMsg(msg);
       toastError(msg);
     } finally {
@@ -183,79 +221,67 @@ export const Login: React.FC = () => {
               </div>
             </div>
 
-            <Link 
-              to="/" 
-              className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 border border-white/20 text-xs font-bold text-white transition-colors flex items-center gap-1.5"
-            >
-              <ArrowLeft size={14} />
-              <span>Beranda</span>
-            </Link>
+            {/* Official Badge (Beranda link removed) */}
+            <div className="px-3 py-1.5 rounded-xl bg-white/15 border border-white/20 text-xs font-bold text-white flex items-center gap-1.5 shadow-xs">
+              <ShieldCheck size={14} className="text-[#38BDF8]" />
+              <span>Portal Dinas</span>
+            </div>
           </div>
 
           {/* Welcome Text Content */}
           <div className="relative z-10 my-auto py-10 sm:py-14 space-y-3">
             <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white leading-tight">
-              {authMode === 'login' ? 'WELCOME TO' : 'JOIN'} <span className="text-[#38BDF8]">PRISMA POS</span>
+              LOGIN <span className="text-[#38BDF8]">PRISMA POS</span>
             </h2>
             <p className="text-xs sm:text-sm font-bold text-[#BAE6FC] uppercase tracking-wider">
-              Pos Resolution & Integrated Service Management Application
+              Helpdesk Terpadu PT Pos Indonesia
             </p>
-            <p className="text-xs sm:text-sm text-white/80 leading-relaxed max-w-sm pt-1">
-              {authMode === 'login' 
-                ? 'Sistem Manajemen Pengaduan & Layanan Terpadu POS Indonesia. Laporkan kendala, pantau progres penanganan, dan tingkatkan efisiensi operasional dengan standar SLA terukur.'
-                : 'Daftarkan akun pelapor Anda untuk kemudahan pelacakan riwayat kendala, konsultasi interaktif dua arah bersama operator, dan pembaruan instan.'}
+            <p className="text-xs sm:text-sm text-white/85 leading-relaxed max-w-sm pt-1">
+              Portal penanganan tiket kendala operasional. Seluruh staf UPT di luar pusat mengajukan tiket secara mandiri, dan ditindaklanjuti secara langsung oleh Petugas Operator & Administrator Kantor Pusat.
             </p>
           </div>
 
           {/* Bottom Security Note */}
           <div className="relative z-10 flex items-center gap-2 text-[11px] text-[#BAE6FC]/80 font-medium">
             <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse" />
-            <span>Koneksi Sistem Terenkripsi & Terverifikasi SSO</span>
+            <span>Koneksi Sistem Terenkripsi & Otentikasi OTP Dua Faktor</span>
           </div>
 
         </div>
 
 
         {/* =========================================================================
-            RIGHT COLUMN: SIGN IN / SIGN UP FORM (CLEAN WHITE CARD)
+            RIGHT COLUMN: SIGN IN & OTP VERIFICATION FORM
         ========================================================================= */}
         <div className="lg:col-span-6 p-8 sm:p-12 flex flex-col justify-center bg-white space-y-5">
           
-          {/* Top Segmented Mode Tabs */}
+          {/* Top Tabs: Sign In vs Registrasi Dinas */}
           <div className="grid grid-cols-2 p-1 bg-[#F1F5F9] rounded-xl">
             <button
               type="button"
-              onClick={() => handleSwitchMode('login')}
-              className={`py-2 text-xs font-bold rounded-lg transition-all text-center cursor-pointer ${
-                authMode === 'login'
-                  ? 'bg-white text-[#0D5C75] shadow-xs'
-                  : 'text-[#64748B] hover:text-[#0F172A]'
-              }`}
+              className="py-2 text-xs font-bold rounded-lg transition-all text-center bg-white text-[#0D5C75] shadow-xs cursor-default"
             >
               Sign In (Masuk)
             </button>
             <button
               type="button"
-              onClick={() => handleSwitchMode('register')}
-              className={`py-2 text-xs font-bold rounded-lg transition-all text-center cursor-pointer ${
-                authMode === 'register'
-                  ? 'bg-white text-[#0D5C75] shadow-xs'
-                  : 'text-[#64748B] hover:text-[#0F172A]'
-              }`}
+              onClick={() => navigate('/register')}
+              className="py-2 text-xs font-bold rounded-lg transition-all text-center text-[#64748B] hover:text-[#0D5C75] flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              Sign Up (Daftar)
+              <UserPlus size={14} />
+              <span>Registrasi Dinas</span>
             </button>
           </div>
 
           {/* Header */}
           <div className="space-y-1">
             <h1 className="text-2xl sm:text-3xl font-extrabold text-[#0F172A] tracking-tight">
-              {authMode === 'login' ? 'Sign In' : 'Sign Up'}
+              {isMfaStep ? 'Verifikasi OTP' : 'Masuk ke Sistem'}
             </h1>
             <p className="text-xs sm:text-sm text-[#64748B]">
-              {authMode === 'login'
-                ? 'Silakan masukkan email dan kata sandi akun Anda'
-                : 'Lengkapi formulir singkat untuk membuat akun baru'}
+              {isMfaStep 
+                ? 'Masukkan 6 digit kode OTP untuk konfirmasi autentikasi dinas'
+                : 'Silakan masukkan email kedinasan dan kata sandi akun Anda'}
             </p>
           </div>
 
@@ -273,8 +299,104 @@ export const Login: React.FC = () => {
 
           {/* Forms with AnimatePresence */}
           <AnimatePresence mode="wait">
-            {authMode === 'login' ? (
-              /* ================= MODE: LOGIN ================= */
+            {isMfaStep ? (
+              /* ================= STEP 2: 6-DIGIT OTP MFA VERIFICATION ================= */
+              <motion.form
+                key="mfa-form"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.2 }}
+                onSubmit={handleMfaSubmit}
+                className="space-y-4"
+              >
+                <div className="p-4 rounded-2xl bg-[#F0F9FF] border border-[#BAE6FD] text-center space-y-2">
+                  <div className="w-12 h-12 mx-auto rounded-full bg-[#0D5C75] text-white flex items-center justify-center shadow-md shadow-[#0D5C75]/20">
+                    <Mail size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-[#0C4A6E]">Tahap 2: Verifikasi Kode OTP</h3>
+                    <p className="text-xs text-[#0369A1] mt-0.5">
+                      Kode OTP verifikasi kedinasan telah dikirimkan ke email Anda:
+                    </p>
+                    <div className="mt-2 inline-block px-3.5 py-1 bg-white border border-[#BAE6FD] rounded-full text-xs font-mono font-bold text-[#0D5C75] shadow-xs">
+                      {maskedEmail || 'Email Terdaftar'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-[#475569] leading-relaxed flex items-center gap-2.5">
+                  <ShieldCheck size={16} className="text-[#0D5C75] flex-shrink-0" />
+                  <span>Silakan buka Kotak Masuk (Inbox) atau folder Spam pada email Anda untuk melihat 6 digit kode OTP.</span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#0F172A] mb-1.5 text-center">
+                    Kode OTP 6-Digit Kedinasan
+                  </label>
+                  <div className="relative">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#94A3B8] pointer-events-none">
+                      <KeyRound size={18} />
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      autoFocus
+                      maxLength={10}
+                      placeholder="000 000"
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
+                      className="w-full h-13 pl-12 pr-4 text-center tracking-[0.3em] font-mono text-xl font-bold rounded-xl bg-[#F8FAFC] border-2 border-[#0D5C75]/30 focus:border-[#0D5C75] text-[#0F172A] placeholder-[#94A3B8] focus:outline-none focus:ring-4 focus:ring-[#0D5C75]/15 transition-all"
+                    />
+                  </div>
+
+                  {/* Resend OTP Button with Countdown */}
+                  <div className="flex items-center justify-between mt-2.5 px-1 text-xs">
+                    <span className="text-[#64748B]">Tidak menerima email?</span>
+                    <button
+                      type="button"
+                      disabled={resendCooldown > 0 || resending}
+                      onClick={handleResendOtp}
+                      className="font-bold text-[#0D5C75] hover:text-[#083342] disabled:text-[#94A3B8] disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center gap-1.5"
+                    >
+                      <RefreshCw size={13} className={resending ? 'animate-spin' : ''} />
+                      <span>
+                        {resending
+                          ? 'Mengirim...'
+                          : resendCooldown > 0
+                          ? `Kirim ulang (${resendCooldown}s)`
+                          : 'Kirim Ulang Kode OTP'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Submit MFA */}
+                <button
+                  type="submit"
+                  disabled={loading || !otpCode}
+                  className="w-full h-12 rounded-xl bg-[#0D5C75] hover:bg-[#083342] text-white text-sm font-bold transition-all shadow-md shadow-[#0D5C75]/25 flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99] disabled:opacity-50"
+                >
+                  <ShieldCheck size={18} />
+                  <span>{loading ? 'Memverifikasi...' : 'Verifikasi & Masuk'}</span>
+                </button>
+
+                {/* Cancel / Back Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMfaStep(false);
+                    setOtpCode('');
+                    setErrorMsg('');
+                  }}
+                  className="w-full py-2 text-xs font-bold text-[#64748B] hover:text-[#0F172A] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <RotateCcw size={14} />
+                  <span>Kembali ke login email & password</span>
+                </button>
+              </motion.form>
+            ) : (
+              /* ================= STEP 1: PASSWORD LOGIN ================= */
               <motion.form 
                 key="login-form"
                 initial={{ opacity: 0, y: 6 }}
@@ -293,7 +415,7 @@ export const Login: React.FC = () => {
                     <input
                       type="email"
                       required
-                      placeholder="Email Dinas / User Name"
+                      placeholder="Email Dinas / Staf"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full h-12 pl-12 pr-4 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0]/60 focus:bg-white border border-transparent focus:border-[#0D5C75] text-sm font-medium text-[#0F172A] placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#0D5C75]/20 transition-all"
@@ -310,7 +432,7 @@ export const Login: React.FC = () => {
                     <input
                       type={showPassword ? 'text' : 'password'}
                       required
-                      placeholder="Password"
+                      placeholder="Kata Sandi"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className="w-full h-12 pl-12 pr-16 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0]/60 focus:bg-white border border-transparent focus:border-[#0D5C75] text-sm font-medium text-[#0F172A] placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#0D5C75]/20 transition-all"
@@ -320,162 +442,65 @@ export const Login: React.FC = () => {
                       onClick={() => setShowPassword(p => !p)}
                       className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-extrabold text-[#0D5C75] hover:text-[#199FB1] uppercase tracking-wider transition-colors cursor-pointer"
                     >
-                      {showPassword ? 'HIDE' : 'SHOW'}
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </div>
 
-                {/* Options Row */}
-                <div className="flex items-center justify-between pt-1">
-                  <label className="flex items-center gap-2 text-xs font-semibold text-[#64748B] cursor-pointer select-none">
-                    <input
-                      type="checkbox"
+                {/* Remember Me */}
+                <div className="flex items-center justify-between pt-0.5">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input 
+                      type="checkbox" 
                       checked={rememberMe}
                       onChange={(e) => setRememberMe(e.target.checked)}
-                      className="w-4 h-4 rounded text-[#0D5C75] focus:ring-[#0D5C75] border-[#CBD5E1]"
+                      className="w-4 h-4 rounded text-[#0D5C75] focus:ring-[#0D5C75] border-[#CBD5E1]" 
                     />
-                    <span>Remember me</span>
+                    <span className="text-xs text-[#64748B] font-medium">Ingat saya di perangkat ini</span>
                   </label>
+                </div>
 
-                  <span 
-                    onClick={() => alert('Silakan hubungi Administrator atau IT Support Helpdesk untuk mereset kata sandi akun dinas Anda.')}
-                    className="text-xs font-semibold text-[#0D5C75] hover:text-[#199FB1] hover:underline cursor-pointer"
+                {/* Submit Button */}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full h-12 rounded-xl bg-[#0D5C75] hover:bg-[#083342] text-white text-sm font-bold transition-all shadow-md shadow-[#0D5C75]/25 flex items-center justify-center cursor-pointer active:scale-[0.99] disabled:opacity-50"
+                >
+                  <span>{loading ? 'Sedang Masuk...' : 'Masuk ke Sistem'}</span>
+                </button>
+
+                {/* Quick Auto-Fill Admin Account */}
+                <div className="pt-3 border-t border-[#F1F5F9] space-y-2">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-[#64748B]">
+                    <span>AKUN RESMI ADMINISTRATOR:</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('admin@poso.local');
+                      setPassword('Admin123!');
+                      setErrorMsg('');
+                    }}
+                    className="w-full py-2 px-3 rounded-xl bg-[#F0F9FF] hover:bg-[#E0F2FE] border border-[#BAE6FD] text-xs font-bold text-[#0D5C75] transition-all flex items-center justify-between cursor-pointer active:scale-[0.99]"
                   >
-                    Forgot Password?
-                  </span>
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck size={16} className="text-[#0D5C75]" />
+                      <span>Admin Pusat (Super Admin)</span>
+                    </div>
+                    <span className="text-[11px] font-mono text-slate-500">admin@poso.local</span>
+                  </button>
                 </div>
 
-                {/* Primary Sign In Button */}
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full h-12 rounded-xl bg-[#0D5C75] hover:bg-[#083342] text-white text-sm font-bold transition-all shadow-md shadow-[#0D5C75]/25 flex items-center justify-center cursor-pointer active:scale-[0.99] mt-2 disabled:opacity-50"
-                >
-                  <span>{loading ? 'Signing In...' : 'Sign In'}</span>
-                </button>
-
-                {/* Footer Switch */}
+                {/* Footer Link to Registrasi Dinas */}
                 <div className="text-center pt-2">
                   <p className="text-xs text-[#64748B]">
-                    Belum memiliki akun?{' '}
-                    <button
-                      type="button"
-                      onClick={() => handleSwitchMode('register')}
-                      className="font-bold text-[#0D5C75] hover:text-[#199FB1] hover:underline cursor-pointer"
+                    Staf UPT / Kantor Cabang belum terdaftar?{' '}
+                    <Link
+                      to="/register"
+                      className="font-bold text-[#0D5C75] hover:text-[#199FB1] hover:underline"
                     >
-                      Daftar Akun Baru
-                    </button>
-                  </p>
-                </div>
-              </motion.form>
-            ) : (
-              /* ================= MODE: REGISTER ================= */
-              <motion.form 
-                key="register-form"
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.15 }}
-                onSubmit={handleRegisterSubmit} 
-                className="space-y-3.5"
-              >
-                {/* Full Name */}
-                <div>
-                  <div className="relative">
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#94A3B8] pointer-events-none">
-                      <User size={18} />
-                    </div>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Nama Lengkap"
-                      value={regName}
-                      onChange={(e) => setRegName(e.target.value)}
-                      className="w-full h-12 pl-12 pr-4 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0]/60 focus:bg-white border border-transparent focus:border-[#0D5C75] text-sm font-medium text-[#0F172A] placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#0D5C75]/20 transition-all"
-                    />
-                  </div>
-                </div>
-
-                {/* Email */}
-                <div>
-                  <div className="relative">
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#94A3B8] pointer-events-none">
-                      <Mail size={18} />
-                    </div>
-                    <input
-                      type="email"
-                      required
-                      placeholder="Email Aktif (contoh@gmail.com)"
-                      value={regEmail}
-                      onChange={(e) => setRegEmail(e.target.value)}
-                      className="w-full h-12 pl-12 pr-4 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0]/60 focus:bg-white border border-transparent focus:border-[#0D5C75] text-sm font-medium text-[#0F172A] placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#0D5C75]/20 transition-all"
-                    />
-                  </div>
-                </div>
-
-                {/* Password */}
-                <div>
-                  <div className="relative">
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#94A3B8] pointer-events-none">
-                      <Lock size={18} />
-                    </div>
-                    <input
-                      type={showRegPassword ? 'text' : 'password'}
-                      required
-                      minLength={6}
-                      placeholder="Kata Sandi (Min. 6 Karakter)"
-                      value={regPassword}
-                      onChange={(e) => setRegPassword(e.target.value)}
-                      className="w-full h-12 pl-12 pr-16 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0]/60 focus:bg-white border border-transparent focus:border-[#0D5C75] text-sm font-medium text-[#0F172A] placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#0D5C75]/20 transition-all"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowRegPassword(p => !p)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-extrabold text-[#0D5C75] hover:text-[#199FB1] uppercase tracking-wider transition-colors cursor-pointer"
-                    >
-                      {showRegPassword ? 'HIDE' : 'SHOW'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Confirm Password */}
-                <div>
-                  <div className="relative">
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#94A3B8] pointer-events-none">
-                      <Lock size={18} />
-                    </div>
-                    <input
-                      type="password"
-                      required
-                      minLength={6}
-                      placeholder="Konfirmasi Kata Sandi"
-                      value={regConfirmPassword}
-                      onChange={(e) => setRegConfirmPassword(e.target.value)}
-                      className="w-full h-12 pl-12 pr-4 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0]/60 focus:bg-white border border-transparent focus:border-[#0D5C75] text-sm font-medium text-[#0F172A] placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#0D5C75]/20 transition-all"
-                    />
-                  </div>
-                </div>
-
-                {/* Primary Register Button */}
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full h-12 rounded-xl bg-[#0D5C75] hover:bg-[#083342] text-white text-sm font-bold transition-all shadow-md shadow-[#0D5C75]/25 flex items-center justify-center cursor-pointer active:scale-[0.99] mt-2 disabled:opacity-50"
-                >
-                  <span>{loading ? 'Creating Account...' : 'Sign Up'}</span>
-                </button>
-
-                {/* Footer Switch */}
-                <div className="text-center pt-2">
-                  <p className="text-xs text-[#64748B]">
-                    Sudah memiliki akun?{' '}
-                    <button
-                      type="button"
-                      onClick={() => handleSwitchMode('login')}
-                      className="font-bold text-[#0D5C75] hover:text-[#199FB1] hover:underline cursor-pointer"
-                    >
-                      Masuk di Sini
-                    </button>
+                      Registrasi Dinas Baru
+                    </Link>
                   </p>
                 </div>
               </motion.form>

@@ -7,29 +7,23 @@ import { MyTicketsPage } from './pages/public/MyTicketsPage';
 import { Login } from './pages/auth/Login';
 import { Register } from './pages/auth/Register';
 import { OperatorDashboard } from './pages/operator/OperatorDashboard';
+import { AccessDenied } from './pages/error/AccessDenied';
 import { ProtectedRoute } from './components/auth/AuthGuard';
 
+// Root Redirect based on Authentication and Role
 const RootRedirect: React.FC = () => {
-  const { user, isAuthenticated, isLoading } = useAuth();
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F4F7F9]">
-        <div className="w-8 h-8 rounded-full border-2 border-[#0D5C75] border-t-transparent animate-spin" />
-      </div>
-    );
-  }
-  if (!isAuthenticated || !user) {
-    return <Navigate to="/login" replace />;
-  }
-  const isStaffRole = user.role === 'admin' || user.role === 'operator' || user.role === 'upt';
-  return <Navigate to={isStaffRole ? "/dashboard" : "/my-tickets"} replace />;
+  const { isAuthenticated, isStaff, isLoading } = useAuth();
+  if (isLoading) return null;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (isStaff) return <Navigate to="/dashboard" replace />;
+  return <Navigate to="/my-tickets" replace />;
 };
 
 export const AppRoutes: React.FC = () => {
   return (
     <Routes>
-      {/* ROOT ROUTE: Langsung ke Halaman Login */}
-      <Route path="/" element={<Navigate to="/login" replace />} />
+      {/* Root redirected to login or role portal (Beranda dihapus) */}
+      <Route path="/" element={<RootRedirect />} />
       <Route path="/submit" element={<PublicTicketForm />} />
       <Route path="/buat-tiket" element={<PublicTicketForm />} />
       <Route path="/track" element={<PublicTicketTracker />} />
@@ -38,6 +32,7 @@ export const AppRoutes: React.FC = () => {
       {/* AUTH ROUTES */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/access-denied" element={<AccessDenied />} />
 
       {/* PUBLIC USER AUTHENTICATED PORTAL */}
       <Route

@@ -58,11 +58,12 @@ app.use((err, req, res, next) => {
 
 // Only listen locally, Vercel serverless handles HTTP natively
 if (!process.env.VERCEL) {
-  const server = app.listen(PORT, () => {
+  const HOST = '0.0.0.0';
+  const server = app.listen(PORT, HOST, () => {
     console.log(`=======================================================`);
-    console.log(` POSO Backend API Server running on port ${PORT}`);
+    console.log(` POSO Backend API Server running on http://${HOST}:${PORT}`);
+    console.log(` Local access: http://127.0.0.1:${PORT}/api`);
     console.log(` Database: Aiven for MySQL (SSL Mode: REQUIRED)`);
-    console.log(` API URL : http://localhost:${PORT}/api`);
     console.log(`=======================================================`);
   });
 
