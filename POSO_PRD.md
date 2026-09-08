@@ -1,8 +1,8 @@
 # Product Requirements Document (PRD)
-## Aplikasi: PRISMA POS — Pos Resolution & Integrated Service Management Application (v2.5.0)
+## Aplikasi: PRISMA POS — Pos Resolution & Integrated Service Management Application (v2.6.0)
 ### Sistem Helpdesk & Manajemen Tiket Terpadu PT Pos Indonesia (Persero)
 
-**Versi:** 2.5.0 (MFA OTP Email, Rekap Produktivitas Operator, Otomasi Regional, Kunci Chat & Reopen Tiket)  
+**Versi:** 2.6.0 (Telegram Bot Gateway, MFA OTP Email, Rekap Produktivitas Operator, Otomasi Regional, Kunci Chat & Reopen Tiket)  
 **Status:** Live & Production Ready  
 **Tipe Dokumen:** Product Requirements & Technical Specification Document  
 
@@ -27,6 +27,7 @@ Sistem ini dibangun dengan arsitektur modern **React 18 + TypeScript + Vite** pa
 9. **Rekap Produktivitas Operator**: Dashboard statistik per operator yang menampilkan jumlah tiket ditangani, total aksi, dan tiket diselesaikan. Akses terbatas untuk Manager/Atasan (permission `operator.stats_view`).
 10. **Otomasi Data Regional & Kantor**: Data Wilayah Regional dan Kantor Cabang otomatis terisi dari profil akun login; tidak ada dropdown manual pada form pengajuan tiket.
 11. **Kunci Chat Tiket Tutup & Mekanisme Buka Kembali**: Chat pelapor dinonaktifkan saat tiket berstatus Closed. Pelapor dapat mengajukan permohonan buka kembali. Operator meninjau dan memutuskan (Setujui / Tolak).
+12. **Telegram Bot Gateway (Notifikasi Real-Time Helpdesk)**: Gateway pesan instan eksternal ke grup tim helpdesk PT Pos Indonesia untuk respon cepat terhadap tiket darurat (prioritas URGENT & HIGH), perubahan status, balasan tiket, dan permohonan buka kembali tiket.
 
 ---
 
@@ -47,6 +48,7 @@ Sistem ini dibangun dengan arsitektur modern **React 18 + TypeScript + Vite** pa
 | **Enkripsi Kredensial** | BCrypt.js (Salt rounds: 10) + JWT | Penyimpanan hash kata sandi dan penandatanganan token otentikasi sesi kedinasan |
 | **Otentikasi Dua Faktor** | Speakeasy / Native TOTP Engine | Algoritma RFC 6238 TOTP, QR-code provisioning, dan verifikasi OTP 6 digit |
 | **Layanan Surat Elektronik** | Nodemailer (SMTP Client) | Pengiriman kode OTP login dan notifikasi dinas via SMTP (Gmail / Corporate Mailer) |
+| **Gateway Notifikasi Eksternal** | Telegram Bot API | RESTful bot notification engine via native Node.js fetch, sanitasi inline keyboard URL |
 | **Sinkronisasi Real-Time** | WebSocket + BroadcastChannel + Storage Events | Sinkronisasi multi-tab dan pembaruan data real-time (<50ms) |
 
 ---
@@ -145,6 +147,25 @@ Workstation utama dengan 8 sub-tampilan (*Views*) yang dikontrol oleh otorisasi 
 3. **Reset MFA oleh Administrator**:
    - Jika staf kehilangan perangkat atau authenticator, Admin dapat menekan tombol **Reset MFA** di tabel Manajemen Staf (`POST /api/admin/users/:id/reset-mfa`).
    - Secret TOTP dikosongkan dan status MFA dinonaktifkan, sehingga staf dapat masuk kembali dan melakukan konfigurasi ulang.
+
+### 4.6 Telegram Bot Gateway (Notifikasi Real-Time Helpdesk)
+1. **Latar Belakang & Tujuan**:
+   - Menghubungkan sistem tiket PRISMA POS secara langsung ke grup/saluran komunikasi Telegram tim helpdesk UPT dan manajemen operasional PT Pos Indonesia.
+   - Menjamin tanggap insiden (MTTR) cepat untuk kendala operasional cabang berkategori kritis tanpa ketergantungan pada pengecekan berkala antarmuka web.
+2. **Siklus Notifikasi & Pemicu (*Event Triggers*)**:
+   - **Tiket Baru Terbit (`sendTicketCreatedAlert`)**: Mengirim rincian tiket meliputi Nomor Tiket, Badge Prioritas (🚨 URGENT, ⚠️ TINGGI, 🟡 SEDANG, 🟢 RENDAH), Unit Kerja Pelapor, Kategori Masalah, Judul, dan Ringkasan Kendala.
+   - **Pembaruan Status Tiket (`sendTicketStatusAlert`)**: Mengirim pemberitahuan saat status tiket berpindah (`Open` ➔ `In Progress` ➔ `Waiting` ➔ `Closed`) lengkap dengan nama petugas penindak dan catatan penyelesaian.
+   - **Permohonan Buka Kembali Tiket (`sendReopenRequestedAlert`)**: Notifikasi darurat saat staf kantor cabang meminta tiket yang sudah ditutup untuk dibuka kembali karena kendala belum tuntas atau berulang.
+   - **Balasan Percakapan Tiket (`sendTicketReplyAlert`)**: Notifikasi respons obrolan baru di dalam thread tiket (membedakan pengirim staf cabang vs petugas helpdesk UPT).
+   - **Pesan Uji Coba Diagnostik (`sendTestMessage`)**: Fitur uji konektivitas instan dari panel admin untuk memvalidasi token bot dan Chat ID grup.
+3. **Panel Kontrol Admin Terpadu (`DataSourceConfig.tsx`)**:
+   - Kartu panel **Telegram Bot Gateway** di dalam tab **Basis Data & Integrasi**.
+   - Menampilkan status koneksi real-time, informasi bot resmi (`PRISMAPOS` / `@PriposBot`), masked token (`7123***:AAFx***`), Chat ID grup terdaftar, dan instruksi setup.
+   - Tombol interaktif **"Kirim Pesan Uji Coba (Test Ping)"** untuk validasi komunikasi bot.
+4. **URL Sanitizer & Keamanan**:
+   - Telegram Bot API menolak tautan bertipe `localhost` / non-publik pada tombol inline keyboard dengan galat HTTP 400.
+   - Sistem dilengkapi mekanisme `sanitizeReplyMarkup` yang otomatis memfilter URL lokal saat pengujian lokal agar pesan teks tetap terkirim sukses ke grup.
+   - Saklar `TELEGRAM_NOTIF_ENABLED` memungkinkan penonaktifan notifikasi instan tanpa mengubah kredensial bot.
 
 ---
 
@@ -340,6 +361,9 @@ Workstation utama dengan 8 sub-tampilan (*Views*) yang dikontrol oleh otorisasi 
   - Mengubah status tiket (`open`, `in_progress`, `waiting`, `closed`).
   - **Akses diblokir untuk UPT_LUAR**.
 - `POST /api/tickets/:id/threads`: Mengirim pesan balasan publik atau catatan internal privat (🔒).
+- `POST /api/tickets/:id/reopen-request` *(Auth Required)*: Mengajukan permohonan buka kembali tiket yang telah berstatus `closed` disertai alasan kendala.
+- `GET /api/tickets/:id/reopen-requests` *(Auth Required)*: Mengambil daftar riwayat permohonan buka kembali untuk tiket tertentu.
+- `PATCH /api/tickets/reopen-requests/:id` *(Staff/Admin)*: Menyetujui atau menolak permohonan buka kembali tiket.
 
 ### 6.4 Persetujuan Registrasi Staf Dinas
 - `GET /api/admin/approvals` *(Admin/Approver)*: Mengambil daftar permohonan pendaftaran berstatus `PENDING`.
@@ -363,3 +387,8 @@ Workstation utama dengan 8 sub-tampilan (*Views*) yang dikontrol oleh otorisasi 
 - `PUT /api/admin/features` *(Admin)*: Memperbarui konfigurasi saklar fitur aplikasi.
 - `GET /api/admin/db-status` *(Admin)*: Mengambil ringkasan kapasitas baris tabel dan kesehatan database Aiven.
 - `GET /api/analytics` *(Staff)*: Mengambil data analitik dan metrik SLA sesuai dengan lingkup data staf.
+- `GET /api/analytics/operator-productivity` *(Manager/Admin)*: Mengambil rekap produktivitas operator helpdesk berdasarkan aksi nyata penanganan tiket.
+
+### 6.7 Telegram Bot Gateway & Notifikasi Eksternal
+- `GET /api/admin/telegram/status` *(Admin)*: Mengambil status konfigurasi Telegram Bot Gateway (apakah token & chat ID terisi, bot info getMe, dan status aktif/nonaktif tanpa membocorkan token).
+- `POST /api/admin/telegram/test` *(Admin)*: Mengirimkan pesan uji coba diagnostik (test ping) ke grup Telegram terdaftar untuk validasi konektivitas.

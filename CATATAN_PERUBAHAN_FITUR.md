@@ -1,12 +1,54 @@
 # CATATAN PERUBAHAN FITUR — POSO (PRISMA POS)
+
+---
+
+## 🚀 Versi 2.6.0 — Telegram Bot Gateway & Notifikasi Real-Time Helpdesk
+**Tanggal Rilis**: 8 September 2026  
+**Versi**: 2.6.0  
+**Disiapkan oleh**: Tim Pengembang PRISMA POS
+
+### Ringkasan Pembaruan v2.6.0
+Pembaruan versi 2.6.0 menghadirkan **Telegram Bot Gateway**, sistem gateway notifikasi eksternal real-time yang menghubungkan sistem PRISMA POS dengan grup/channel Telegram tim helpdesk operasional PT Pos Indonesia. Fitur ini memastikan setiap insiden kritis dan aktivitas tiket tertangani secara tanggap tanpa harus terus-menerus memantau layar dashboard.
+
+### Fitur Utama Telegram Bot Gateway:
+1. **Notifikasi Multi-Event Real-Time**:
+   - 🎫 **Tiket Baru Masuk**: Notifikasi instan mencakup Nomor Tiket, Badge Prioritas (🚨 URGENT, ⚠️ TINGGI, dll.), Unit Kerja Pelapor, Kategori, Subjek, dan Uraian Kendala.
+   - 🔄 **Pembaruan Status Tiket**: Notifikasi otomatis saat tiket berpindah status (`Open` ➔ `In Progress` ➔ `Waiting` ➔ `Closed / Selesai`) disertai nama petugas penindak dan catatan penyelesaian.
+   - 🔓 **Permohonan Buka Kembali Tiket (Reopen Request)**: Peringatan ke tim UPT saat staf cabang mengajukan permohonan buka kembali tiket yang telah ditutup beserta alasan kendala berulang.
+   - 💬 **Balasan Pesan Baru**: Notifikasi setiap ada respons obrolan baru di dalam thread tiket (membedakan pelapor cabang vs petugas UPT).
+   - 🚀 **Pesan Uji Koneksi Diagnostik (Test Ping)**: Pengujian konektivitas bot langsung dari panel admin.
+
+2. **Panel Kontrol Admin Terpadu (`DataSourceConfig.tsx`)**:
+   - Kartu panel khusus **Telegram Bot Gateway** di tab **Basis Data & Integrasi**.
+   - Indikator status koneksi real-time (**Aktif & Terhubung** / **Belum Dikonfigurasi** / **Dinonaktifkan**).
+   - Info Bot Telegram resmi: nama bot (`PRISMAPOS`), username (`@PriposBot`), ID bot, dan Chat ID target dengan masking token aman (`7123***:AAFx***`).
+   - Panduan setup langkah-demi-langkah (BotFather, Chat ID, format `.env`).
+   - Tombol interaktif **"Kirim Pesan Uji Coba (Test Ping)"** dengan feedback visual seketika.
+
+3. **Arsitektur Tanpa Dependensi Berat & Sanitasi URL**:
+   - Menggunakan native `fetch` ke Telegram Bot API resmi (`https://api.telegram.org/bot<TOKEN>/sendMessage`).
+   - Fitur **URL Sanitizer** untuk tombol inline keyboard: Telegram menolak URL `localhost` / non-publik pada tombol inline. Gateway otomatis menyaring tautan lokal saat mode pengujian lokal agar pesan tetap terkirim sukses tanpa error `400 Bad Request`.
+   - Toggle switch `TELEGRAM_NOTIF_ENABLED` untuk mematikan/menyalakan notifikasi tanpa menghapus kredensial token.
+
+### File yang Dibuat & Dimodifikasi (v2.6.0)
+| File | Status | Keterangan Perubahan |
+|---|---|---|
+| `server/utils/telegram.js` | **BARU** | Layanan lengkap Telegram Bot Gateway: 7 fungsi alert terformat HTML, verifikasi bot, sanitasi inline URL, dan pengujian koneksi. |
+| `server/controllers/ticketController.js` | Dimodifikasi | Integrasi trigger alert di 5 siklus tiket (`createTicket`, `updateTicketStatus`, `addThreadMessage`, `requestTicketReopen`, `reviewTicketReopen`). |
+| `server/controllers/analyticsController.js` | Dimodifikasi | Endpoint `getTelegramStatus` dan `testTelegramNotification` untuk monitoring status bot dan test ping. |
+| `server/routes/api.js` | Dimodifikasi | Rute baru `GET /api/admin/telegram/status` dan `POST /api/admin/telegram/test`. |
+| `src/services/api.ts` | Dimodifikasi | Penambahan method API client `getTelegramStatus()` dan `testTelegramNotification()`. |
+| `src/components/admin/DataSourceConfig.tsx` | Dimodifikasi | Panel UI Telegram Bot Gateway dengan status badge, bot profile info, petunjuk integrasi, dan tombol test ping. |
+| `.env` & `.env.example` | Dimodifikasi | Penambahan variabel `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_NOTIF_ENABLED`, dan `APP_BASE_URL`. |
+
+---
+
+## 📦 Versi 2.5.0 — MFA OTP Email, Produktivitas Operator, Otomasi Regional & Reopen
 **Tanggal Rilis**: 7 September 2026  
 **Versi**: 2.5.0  
 **Disiapkan oleh**: Tim Pengembang PRISMA POS
 
----
-
-## Ringkasan Perubahan
-
+### Ringkasan Perubahan v2.5.0
 Pembaruan ini mencakup **4 peningkatan fitur utama** pada sistem POSO, meliputi keamanan login, transparansi produktivitas operator, otomatisasi data wilayah, dan mekanisme buka kembali tiket yang sudah ditutup.
 
 ---

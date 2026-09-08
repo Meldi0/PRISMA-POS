@@ -13,7 +13,12 @@ import {
   Terminal, 
   Server,
   Lock,
-  Globe
+  Globe,
+  Send,
+  BotMessageSquare,
+  Info,
+  AlertCircle,
+  ChevronRight
 } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
@@ -22,6 +27,17 @@ export const DataSourceConfig: React.FC = () => {
   const { success, error: toastError } = useToast();
   const [testing, setTesting] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [telegramData, setTelegramData] = useState<{
+    enabled: boolean;
+    configured: boolean;
+    maskedToken?: string | null;
+    chatId?: string | null;
+    baseUrl?: string;
+    bot?: { firstName: string; username: string; id: number; canJoinGroups: boolean } | null;
+    setupGuide?: Record<string, string> | null;
+  } | null>(null);
+  const [telegramLoading, setTelegramLoading] = useState(false);
+  const [telegramTesting, setTelegramTesting] = useState(false);
   const [dbData, setDbData] = useState<{
     database_engine: string;
     host: string;
@@ -51,8 +67,39 @@ export const DataSourceConfig: React.FC = () => {
     }
   };
 
+  const fetchTelegramStatus = async () => {
+    setTelegramLoading(true);
+    try {
+      const res = await apiService.getTelegramStatus();
+      if (res.status === 'success' && res.data) {
+        setTelegramData(res.data);
+      }
+    } catch (err: any) {
+      // silent - telegram may not be configured
+    } finally {
+      setTelegramLoading(false);
+    }
+  };
+
+  const handleTestTelegram = async () => {
+    setTelegramTesting(true);
+    try {
+      const res = await apiService.testTelegramNotification();
+      if (res.status === 'success') {
+        success(res.message || 'Pesan uji coba berhasil dikirim ke Telegram!');
+      } else {
+        toastError(res.message || 'Gagal mengirim pesan ke Telegram.');
+      }
+    } catch (err: any) {
+      toastError(err.message || 'Gagal menghubungi Telegram API.');
+    } finally {
+      setTelegramTesting(false);
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
+    fetchTelegramStatus();
   }, []);
 
   const handleTestConnection = async () => {
@@ -293,6 +340,129 @@ export const DataSourceConfig: React.FC = () => {
             <span>npm run dev</span>
             <span className="text-slate-400 text-[11px] font-sans">Jalankan Express Backend (5001) & Vite (3000)</span>
           </div>
+        </div>
+      </div>
+
+      {/* ── TELEGRAM BOT GATEWAY PANEL ───────────────────────────────────── */}
+      <div className="bg-white rounded-[16px] border border-[#E2E8F0]/80 p-6 shadow-sm space-y-4 mt-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-[10px] flex items-center justify-center"
+              style={{ background: 'linear-gradient(135deg, #229ED9 0%, #1a7bbf 100%)' }}>
+              <BotMessageSquare size={20} className="text-white" />
+            </div>
+            <div>
+              <h3 className="text-[15px] font-bold text-[#0F172A]">Telegram Bot Gateway</h3>
+              <p className="text-[11px] text-[#64748B]">Notifikasi real-time tiket ke grup Telegram tim helpdesk</p>
+            </div>
+          </div>
+          {telegramData && (
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold ${
+              telegramData.configured
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                : 'bg-amber-50 text-amber-700 border border-amber-200'
+            }`}>
+              {telegramData.configured ? (
+                <><CheckCircle2 size={11} /> Terhubung & Aktif</>
+              ) : (
+                <><AlertCircle size={11} /> Belum Dikonfigurasi</>
+              )}
+            </span>
+          )}
+        </div>
+
+        {telegramLoading && (
+          <div className="flex items-center gap-2 text-[12px] text-slate-500 py-2">
+            <RefreshCw size={13} className="animate-spin" />
+            <span>Mengambil status bot Telegram...</span>
+          </div>
+        )}
+
+        {/* Bot Info (if configured) */}
+        {telegramData?.configured && telegramData.bot && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 rounded-[10px] bg-[#F0F9FF] border border-blue-100">
+              <p className="text-[10px] text-blue-500 font-semibold uppercase tracking-wider mb-1">Nama Bot</p>
+              <p className="text-[13px] font-bold text-[#0F172A]">{telegramData.bot.firstName}</p>
+            </div>
+            <div className="p-3 rounded-[10px] bg-[#F0F9FF] border border-blue-100">
+              <p className="text-[10px] text-blue-500 font-semibold uppercase tracking-wider mb-1">Username Bot</p>
+              <p className="text-[13px] font-bold text-[#0F172A]">@{telegramData.bot.username}</p>
+            </div>
+            <div className="p-3 rounded-[10px] bg-[#F0F9FF] border border-blue-100">
+              <p className="text-[10px] text-blue-500 font-semibold uppercase tracking-wider mb-1">Token (masked)</p>
+              <p className="text-[12px] font-mono text-slate-600">{telegramData.maskedToken}</p>
+            </div>
+            <div className="p-3 rounded-[10px] bg-[#F0F9FF] border border-blue-100">
+              <p className="text-[10px] text-blue-500 font-semibold uppercase tracking-wider mb-1">Target Chat ID</p>
+              <p className="text-[12px] font-mono text-slate-600">{telegramData.chatId}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Notifications Coverage */}
+        {telegramData?.configured && (
+          <div className="p-3 rounded-[10px] bg-emerald-50 border border-emerald-100 space-y-1.5">
+            <p className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1.5">
+              <CheckCircle2 size={12} /> Cakupan Notifikasi Aktif
+            </p>
+            {[
+              '📦 Tiket baru diterbitkan (termasuk prioritas Urgent & High)',
+              '🔄 Perubahan status penanganan tiket (Open → In Progress → Closed)',
+              '⚠️ Permohonan buka kembali tiket yang sudah ditutup (Reopen Request)',
+              '💬 Balasan percakapan publik baru di tiket'
+            ].map((item, i) => (
+              <p key={i} className="text-[11px] text-emerald-800">{item}</p>
+            ))}
+          </div>
+        )}
+
+        {/* Setup Guide (if not configured) */}
+        {telegramData && !telegramData.configured && telegramData.setupGuide && (
+          <div className="p-4 rounded-[10px] bg-amber-50 border border-amber-200 space-y-2">
+            <p className="text-[11px] font-bold text-amber-700 flex items-center gap-1.5">
+              <Info size={12} /> Panduan Aktivasi Telegram Bot
+            </p>
+            {Object.values(telegramData.setupGuide).map((step: string, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className="mt-0.5 w-5 h-5 rounded-full bg-amber-200 text-amber-800 text-[10px] font-bold flex items-center justify-center flex-shrink-0">{i + 1}</span>
+                <p className="text-[11px] text-amber-900">{step}</p>
+              </div>
+            ))}
+            <div className="mt-3 p-2.5 rounded-lg bg-slate-900 text-slate-100 text-[11px] font-mono space-y-1">
+              <p className="text-slate-400 text-[10px]"># Tambahkan ke file .env lalu restart server:</p>
+              <p>TELEGRAM_BOT_TOKEN=7123456789:AAFxAbc...xyz</p>
+              <p>TELEGRAM_CHAT_ID=-1001234567890</p>
+              <p>TELEGRAM_NOTIF_ENABLED=true</p>
+              <p>APP_BASE_URL=https://your-domain.vercel.app</p>
+            </div>
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div className="flex gap-2 pt-1">
+          <button
+            id="btn-refresh-telegram-status"
+            onClick={fetchTelegramStatus}
+            disabled={telegramLoading}
+            className="flex items-center gap-2 px-4 py-2 rounded-[10px] text-[12px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+          >
+            <RefreshCw size={13} className={telegramLoading ? 'animate-spin' : ''} />
+            Refresh Status
+          </button>
+          {telegramData?.configured && (
+            <button
+              id="btn-test-telegram-ping"
+              onClick={handleTestTelegram}
+              disabled={telegramTesting}
+              className="flex items-center gap-2 px-4 py-2 rounded-[10px] text-[12px] font-semibold text-white transition-colors"
+              style={{ background: telegramTesting ? '#94a3b8' : 'linear-gradient(135deg, #229ED9 0%, #1a7bbf 100%)' }}
+            >
+              <Send size={13} className={telegramTesting ? 'animate-pulse' : ''} />
+              {telegramTesting ? 'Mengirim...' : 'Kirim Pesan Uji Coba (Test Ping)'}
+            </button>
+          )}
         </div>
       </div>
     </div>

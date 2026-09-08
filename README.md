@@ -1,7 +1,7 @@
 # PRISMA POS — Pos Resolution & Integrated Service Management Application
 
 > **Sistem Helpdesk & Manajemen Tiket Terpadu Kedinasan PT Pos Indonesia (Persero)**  
-> *Versi 2.5.0 — MFA OTP Email, Rekap Produktivitas Operator, Otomasi Regional, & Reopen Tiket Release*
+> *Versi 2.6.0 — Telegram Bot Gateway, MFA OTP Email, Rekap Produktivitas Operator, Otomasi Regional, & Reopen Tiket Release*
 
 Aplikasi Helpdesk dan Manajemen Tiket Terpadu modern berbasis web yang dirancang khusus untuk lingkungan kerja **PT Pos Indonesia (Persero)**. Menghubungkan Kantor Pos Cabang (KCU/KC/KCP), Kantor Regional, dan Kantor Pusat Pengendalian Operasi dalam satu ekosistem terpadu berdesain elegan **Ocean Cyan Glassmorphism** yang sepenuhnya responsif di semua ukuran perangkat (desktop, tablet, dan smartphone).
 
@@ -43,6 +43,7 @@ Aplikasi Helpdesk dan Manajemen Tiket Terpadu modern berbasis web yang dirancang
 ### 8. Kompresi Foto Cerdas & Notifikasi Real-Time
 - **Auto-Kompresi Gambar di Klien**: Reduksi ukuran foto bukti kerusakan hingga 85% (~200KB) langsung di peramban pelapor sebelum dikirimkan ke server.
 - **Sistem Notifikasi Berlapis**: Nada denting harmonik Web Audio API tanpa latensi, push notification browser desktop, lonceng notifikasi, widget mengambang *Floating Chat Badge*, dan notifikasi email dinas via SMTP.
+
 ### 9. Rekap Produktivitas Operator
 - **Dashboard Rekap per Atasan**: Tabel produktivitas tiket yang ditangani setiap operator (berdasarkan aksi nyata, bukan sekadar melihat tiket).
 - **Akses Terbatas**: Hanya Manager/Atasan (permission `operator.stats_view`) dapat mengakses laporan ini.
@@ -57,13 +58,21 @@ Aplikasi Helpdesk dan Manajemen Tiket Terpadu modern berbasis web yang dirancang
 - **Ajukan Buka Kembali**: Pelapor dapat mengajukan permohonan buka kembali tiket disertai alasan.
 - **Review Operator**: Operator UPT meninjau permohonan dan memutuskan Setujui (tiket aktif kembali) atau Tolak (tiket tetap tertutup).
 
+### 12. Telegram Bot Gateway (Notifikasi Real-Time Helpdesk)
+- **Notifikasi Otomatis ke Grup Tim**: Mengirim pesan peringatan instan ke grup/channel Telegram staf operasional saat terjadi tiket baru (terutama prioritas URGENT & HIGH), perubahan status penanganan, balasan baru, dan permohonan buka kembali tiket.
+- **Panel Manajemen Admin**: Kartu integrasi di tab Basis Data & Integrasi dengan status koneksi, profil bot `@PriposBot`, masked token, dan tombol *Test Ping*.
+- **URL Sanitizer Cerdas**: Memastikan tautan tombol inline keyboard kompatibel secara otomatis di lingkungan development lokal maupun live deployment.
 
+---
+
+## Teknologi & Arsitektur (Tech Stack)
 
 - **Frontend**: React 18.3, TypeScript 5.7, Vite 6.1, Tailwind CSS v3.4, Framer Motion v11, Lucide React Icons
 - **Backend API**: Node.js, Express 5.x RESTful API, Vercel Serverless Functions
 - **Basis Data Master**: Cloud Relational Database **Aiven for MySQL 8.0** (SSL Mode: REQUIRED / TLS 1.3)
 - **Keamanan & Kriptografi**: BCrypt.js (Salt rounds: 10), JSON Web Token (JWT), RFC 6238 TOTP Engine
 - **Layanan Email**: Nodemailer (SMTP Transport Client)
+- **Gateway Notifikasi Eksternal**: Telegram Bot API (Native Fetch, Lightweight REST Integration)
 - **Sinkronisasi Real-time**: Web Audio API, WebSocket, BroadcastChannel & LocalStorage Event Engine
 
 ---
@@ -80,7 +89,7 @@ Salin berkas contoh lingkungan `.env.example` ke `.env`:
 ```bash
 cp .env.example .env
 ```
-Sesuaikan kredensial koneksi Aiven for MySQL dan konfigurasi SMTP Anda:
+Sesuaikan kredensial koneksi Aiven for MySQL, SMTP, dan Telegram Bot Gateway:
 ```env
 DB_HOST=your-mysql-host.aivencloud.com
 DB_PORT=21970
@@ -96,6 +105,12 @@ SMTP_PORT=587
 SMTP_USER=your-account@gmail.com
 SMTP_PASS=your-app-password
 EMAIL_FROM="PRISMA POS Kedinasan" <noreply@posindonesia.co.id>
+
+# Telegram Bot Gateway (opsional, jika ingin notifikasi grup Telegram)
+TELEGRAM_BOT_TOKEN=8826254985:AAE8vrvRcCNs4kJlYEF7CLtKzgYpH6xFuF8
+TELEGRAM_CHAT_ID=-5349405519
+TELEGRAM_NOTIF_ENABLED=true
+APP_BASE_URL=http://localhost:5173
 ```
 
 ### 3. Uji Koneksi & Migrasi Basis Data
