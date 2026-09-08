@@ -384,7 +384,7 @@ export const PublicTicketTracker: React.FC = () => {
             </Link>
             <ChevronRight size={14} className="text-[#CBD5E1]" />
             <div className="flex items-center gap-2">
-              <div className="w-5 h-5 rounded-[5px] bg-slate-100 p-0.5 border border-slate-200 flex items-center justify-center">
+              <div className="w-7 h-7 rounded-[7px] bg-white p-0.5 border border-slate-200 flex items-center justify-center shadow-2xs">
                 <img src="/prisma-pos-logo.png" alt="PRISMA POS Logo" className="w-full h-full object-contain" />
               </div>
               <span className="text-[13px] font-bold text-[#0D5C75]">PRISMA POS</span>

@@ -419,7 +419,7 @@ export const LandingPage: React.FC = () => {
       <footer className="border-t border-[#E2E8F0] bg-white w-full">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-[8px] bg-slate-100 p-0.5 border border-slate-200 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-[8px] bg-white p-1 border border-slate-200 flex items-center justify-center shadow-2xs">
               <img src="/prisma-pos-logo.png" alt="PRISMA POS Logo" className="w-full h-full object-contain" />
             </div>
             <span className="text-[13px] font-semibold text-[#64748B]">PRISMA POS — Pos Resolution & Integrated Service Management Application © 2026</span>

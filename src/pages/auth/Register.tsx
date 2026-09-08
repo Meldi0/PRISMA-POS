@@ -129,7 +129,7 @@ export const Register: React.FC = () => {
           <span>Kembali ke Halaman Masuk</span>
         </Link>
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-[8px] bg-slate-100 p-0.5 flex items-center justify-center border border-slate-200">
+          <div className="w-9 h-9 rounded-xl bg-white p-1 flex items-center justify-center border border-[#CBD5E1] shadow-xs">
             <img src="/prisma-pos-logo.png" alt="POSO Logo" className="w-full h-full object-contain" />
           </div>
           <span className="font-black text-[15px] text-[#0D5C75]">POSO HELPDESK</span>

@@ -218,7 +218,7 @@ export const Login: React.FC = () => {
           {/* Top Brand Tag */}
           <div className="relative z-10 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-md border border-white/25 p-1 flex items-center justify-center shadow-sm">
+              <div className="w-11 h-11 rounded-xl bg-white p-1.5 flex items-center justify-center shadow-md border border-white/40">
                 <img src="/prisma-pos-logo.png" alt="PRISMA POS Logo" className="w-full h-full object-contain" />
               </div>
               <div>

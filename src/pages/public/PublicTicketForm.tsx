@@ -495,7 +495,7 @@ export const PublicTicketForm: React.FC = () => {
             <span>{backLabel}</span>
           </Link>
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-[6px] bg-slate-100 p-0.5 border border-slate-200 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-[8px] bg-white p-1 border border-slate-200 flex items-center justify-center shadow-xs">
               <img src="/prisma-pos-logo.png" alt="PRISMA POS Logo" className="w-full h-full object-contain" />
             </div>
             <span className="text-xs font-bold text-[#0D5C75] bg-[#EAF4F8] px-3 py-1 rounded-full border border-[#A5D1E1]/40">

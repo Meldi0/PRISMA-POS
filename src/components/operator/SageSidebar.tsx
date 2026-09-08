@@ -172,8 +172,8 @@ export const SageSidebar: React.FC<SageSidebarProps> = ({
       {/* Logo Header */}
       <div className="flex items-center justify-between h-16 px-4 border-b border-white/10 flex-shrink-0">
         <div className="flex items-center gap-3 overflow-hidden">
-          <div className="w-9 h-9 rounded-[10px] bg-white/10 p-1 flex items-center justify-center flex-shrink-0 shadow-sm border border-white/15">
-            <img src="/prisma-pos-logo.png" alt="PRISMA POS Logo" className="w-full h-full object-contain" />
+          <div className="w-10 h-10 rounded-xl bg-white p-1.5 flex items-center justify-center flex-shrink-0 shadow-md border border-white/30">
+            <img src="/prisma-pos-logo.png" alt="PRISMA POS Logo" className="w-full h-full object-contain drop-shadow-xs" />
           </div>
           {!collapsed && (
             <div className="overflow-hidden">
