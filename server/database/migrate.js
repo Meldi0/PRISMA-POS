@@ -211,6 +211,14 @@ export async function runMigration() {
     await addColumnIfNotExists('audit_logs', 'ip_address', "VARCHAR(45) DEFAULT NULL AFTER description");
     await addColumnIfNotExists('audit_logs', 'user_agent', "TEXT DEFAULT NULL AFTER ip_address");
 
+    // Performance Indexes for Operator Statistics & Audit
+    try {
+      await connection.query("ALTER TABLE audit_logs ADD INDEX idx_audit_actor_action_date (actor_id, action, created_at)");
+    } catch (e) {}
+    try {
+      await connection.query("ALTER TABLE threads ADD INDEX idx_threads_sender_date (sender_id, created_at)");
+    } catch (e) {}
+
     // ---------------------------------------------------------------------------------------------
     // 3. SEEDING MASTER DATA: REGIONS, OFFICES, ROLES, & PERMISSIONS
     // ---------------------------------------------------------------------------------------------

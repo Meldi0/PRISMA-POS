@@ -298,6 +298,7 @@ export async function verifyMfa(req, res) {
       region_code: user.regional_code,
       office_name: user.office_name,
       office_code: user.office_code,
+      nopen_kc: user.office_code,
       position: user.position,
       nip: user.nip,
       phone_number: null,
@@ -404,9 +405,12 @@ export async function register(req, res) {
       email,
       phone,
       position,
+      nip,
       nopen,
+      office_name,
+      kc_name,
       user_type = 'CABANG', // REGIONAL | CABANG
-      region_id,
+      region_id = 'REG-03',
       office_id,
       password
     } = req.body;
@@ -444,6 +448,64 @@ export async function register(req, res) {
       });
     }
 
+    // Normalize region_id
+    let cleanRegionId = region_id || 'REG-03';
+    if (cleanRegionId === 'REG1') cleanRegionId = 'REG-01';
+    else if (cleanRegionId === 'REG2') cleanRegionId = 'REG-02';
+    else if (cleanRegionId === 'REG3') cleanRegionId = 'REG-03';
+    else if (cleanRegionId === 'REG4') cleanRegionId = 'REG-04';
+    else if (cleanRegionId === 'REG5') cleanRegionId = 'REG-05';
+    else if (cleanRegionId === 'REG6') cleanRegionId = 'REG-06';
+    else if (cleanRegionId === 'PUSAT') cleanRegionId = 'REG-PUSAT';
+
+    // Automatic Office Record Resolution from Manual Input
+    // Pengguna mengetik nama KC & nopen secara manual agar tidak perlu input database master manual
+    const cleanOfficeName = (office_name || kc_name || '').trim();
+    const cleanNopen = (nopen || '').trim();
+    let targetOfficeId = office_id || null;
+
+    if (cleanOfficeName || cleanNopen) {
+      let existingOffice = null;
+      // 1. Check existing office by Nopen code
+      if (cleanNopen) {
+        const [rowsByCode] = await pool.query(
+          'SELECT office_id, name, code, region_id FROM offices WHERE code = ? LIMIT 1',
+          [cleanNopen]
+        );
+        if (rowsByCode.length > 0) existingOffice = rowsByCode[0];
+      }
+      // 2. Check existing office by Name
+      if (!existingOffice && cleanOfficeName) {
+        const [rowsByName] = await pool.query(
+          'SELECT office_id, name, code, region_id FROM offices WHERE LOWER(name) = LOWER(?) LIMIT 1',
+          [cleanOfficeName]
+        );
+        if (rowsByName.length > 0) existingOffice = rowsByName[0];
+      }
+
+      if (existingOffice) {
+        targetOfficeId = existingOffice.office_id;
+      } else {
+        // Otomatis buat entri office baru di database sehingga langsung terekap
+        const slug = cleanNopen ? cleanNopen.replace(/[^a-zA-Z0-9]/g, '') : Math.random().toString(36).substring(2, 7).toUpperCase();
+        let newOfficeId = `OFC-${slug}`;
+        const [chk] = await pool.query('SELECT office_id FROM offices WHERE office_id = ? LIMIT 1', [newOfficeId]);
+        if (chk.length > 0) {
+          newOfficeId = `${newOfficeId}-${Date.now().toString().slice(-4)}`;
+        }
+
+        const finalOfficeName = cleanOfficeName || `Kantor Pos ${cleanNopen}`;
+        const finalNopen = cleanNopen || '00000';
+
+        await pool.query(`
+          INSERT INTO offices (office_id, region_id, name, code, type, created_at)
+          VALUES (?, ?, ?, ?, 'KC', NOW())
+        `, [newOfficeId, cleanRegionId, finalOfficeName, finalNopen]);
+
+        targetOfficeId = newOfficeId;
+      }
+    }
+
     const userId = `USR-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
     const hashedPassword = await hashPassword(password);
 
@@ -460,8 +522,8 @@ export async function register(req, res) {
       ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 1, 'self_registration')
     `, [
       userId, cleanName, cleanEmail, hashedPassword, password, role,
-      accountStatus, region_id || null, office_id || null, dataScope, position || null,
-      nopen || null
+      accountStatus, cleanRegionId, targetOfficeId, dataScope, position || 'Staf Operasional',
+      (nip || '').trim() || cleanNopen || null
     ]);
 
     // Insert approval entry
@@ -515,7 +577,8 @@ export async function getProfile(req, res) {
         u.user_id, u.name, u.email, u.role, u.is_active, u.account_status,
         u.region_id, u.office_id, u.data_scope, u.position, u.mfa_enabled,
         u.nip, u.department, u.role_title,
-        r.name AS regional_name, o.name AS office_name
+        r.name AS regional_name, r.code AS region_code,
+        o.name AS office_name, o.code AS office_code, o.code AS nopen_kc
       FROM users u
       LEFT JOIN regions r ON u.region_id = r.region_id
       LEFT JOIN offices o ON u.office_id = o.office_id

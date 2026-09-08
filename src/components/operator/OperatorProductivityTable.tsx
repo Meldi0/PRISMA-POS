@@ -12,7 +12,10 @@ import {
   RefreshCw,
   TrendingUp,
   UserCheck,
-  Briefcase
+  Briefcase,
+  Calendar,
+  Filter,
+  RotateCcw
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { apiService } from '../../services/api';
@@ -27,11 +30,13 @@ export const OperatorProductivityTable: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'ADMIN_PUSAT' || user?.role === 'admin';
   const canViewStats = isAdmin || hasPermission('operator.stats_view') || hasPermission('*');
 
-  const fetchProductivity = async (silent = false) => {
+  const fetchProductivity = async (silent = false, customStart?: string, customEnd?: string) => {
     if (!canViewStats) {
       setLoading(false);
       return;
@@ -41,7 +46,9 @@ export const OperatorProductivityTable: React.FC = () => {
     else setIsRefreshing(true);
 
     try {
-      const res = await apiService.getOperatorProductivity();
+      const sDate = customStart !== undefined ? customStart : startDate;
+      const eDate = customEnd !== undefined ? customEnd : endDate;
+      const res = await apiService.getOperatorProductivity(sDate || undefined, eDate || undefined);
       if (res.status === 'success' && res.data) {
         setData(res.data);
       } else {
@@ -59,6 +66,16 @@ export const OperatorProductivityTable: React.FC = () => {
   useEffect(() => {
     fetchProductivity();
   }, [canViewStats]);
+
+  const handleApplyFilter = () => {
+    fetchProductivity(false, startDate, endDate);
+  };
+
+  const handleResetFilter = () => {
+    setStartDate('');
+    setEndDate('');
+    fetchProductivity(false, '', '');
+  };
 
   const filteredData = useMemo(() => {
     if (!searchQuery.trim()) return data;
@@ -244,6 +261,57 @@ export const OperatorProductivityTable: React.FC = () => {
 
       {/* Main Table Container */}
       <div className="bg-white rounded-[16px] border border-[#E2E8F0] shadow-xs overflow-hidden flex flex-col">
+        {/* Date Range Period Filter */}
+        <div className="px-4 py-3 border-b border-[#E2E8F0] bg-white flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-[#0D5C75]">
+              <Calendar size={15} />
+              <span>Periode Aktivitas:</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="h-8.5 px-2.5 rounded-[8px] border border-[#CBD5E1] bg-[#F8FAFC] text-xs font-medium text-[#0F172A] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#0D5C75]"
+                title="Tanggal Mulai"
+              />
+              <span className="text-xs text-[#94A3B8]">s.d.</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="h-8.5 px-2.5 rounded-[8px] border border-[#CBD5E1] bg-[#F8FAFC] text-xs font-medium text-[#0F172A] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#0D5C75]"
+                title="Tanggal Akhir"
+              />
+              <button
+                type="button"
+                onClick={handleApplyFilter}
+                className="h-8.5 px-3 rounded-[8px] bg-[#0D5C75] hover:bg-[#083342] text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Filter size={12} />
+                <span>Filter Periode</span>
+              </button>
+              {(startDate || endDate) && (
+                <button
+                  type="button"
+                  onClick={handleResetFilter}
+                  className="h-8.5 px-2.5 rounded-[8px] border border-[#CBD5E1] bg-white hover:bg-slate-50 text-[#64748B] text-xs font-medium transition-all cursor-pointer flex items-center gap-1"
+                  title="Reset Filter Tanggal"
+                >
+                  <RotateCcw size={12} />
+                  <span>Reset</span>
+                </button>
+              )}
+            </div>
+          </div>
+          {(startDate || endDate) && (
+            <span className="text-[11px] font-semibold text-[#0D5C75] bg-[#EAF4F8] px-2.5 py-1 rounded-full border border-[#BAE6FD]">
+              Periode aktif: {startDate || 'Awal'} s.d. {endDate || 'Hari ini'}
+            </span>
+          )}
+        </div>
+
         {/* Table Search & Filter Bar */}
         <div className="p-4 border-b border-[#E2E8F0] bg-[#F8FAFC] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="relative flex-1 max-w-md">

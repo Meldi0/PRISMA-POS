@@ -262,6 +262,30 @@ export async function getOperatorProductivity(req, res) {
       });
     }
 
+    const { start_date, end_date } = req.query;
+
+    let dateFilterAudit = '';
+    let dateFilterThreads = '';
+    const queryParams = [];
+
+    if (start_date && end_date) {
+      dateFilterAudit = ' AND created_at >= ? AND created_at <= ?';
+      dateFilterThreads = ' AND created_at >= ? AND created_at <= ?';
+      const startObj = new Date(start_date + 'T00:00:00');
+      const endObj = new Date(end_date + 'T23:59:59');
+      queryParams.push(startObj, endObj, startObj, endObj);
+    } else if (start_date) {
+      dateFilterAudit = ' AND created_at >= ?';
+      dateFilterThreads = ' AND created_at >= ?';
+      const startObj = new Date(start_date + 'T00:00:00');
+      queryParams.push(startObj, startObj);
+    } else if (end_date) {
+      dateFilterAudit = ' AND created_at <= ?';
+      dateFilterThreads = ' AND created_at <= ?';
+      const endObj = new Date(end_date + 'T23:59:59');
+      queryParams.push(endObj, endObj);
+    }
+
     // Ambil daftar operator UPT & Admin beserta rekap tindakan nyata pada tiket
     const [rows] = await pool.query(`
       SELECT 
@@ -287,6 +311,7 @@ export async function getOperatorProductivity(req, res) {
         FROM audit_logs
         WHERE ticket_id IS NOT NULL 
           AND action IN ('STATUS_CHANGE', 'RESOLVE_TICKET', 'CLOSE_TICKET', 'CLAIM_TICKET', 'ASSIGN_TICKET', 'TRIAGE')
+          ${dateFilterAudit}
         
         UNION ALL
         
@@ -299,11 +324,12 @@ export async function getOperatorProductivity(req, res) {
           0 AS is_resolve
         FROM threads
         WHERE sender_role IN ('PETUGAS_UPT', 'OPERATOR', 'ADMIN', 'admin', 'upt')
+          ${dateFilterThreads}
       ) activity ON u.user_id = activity.user_id
       WHERE u.role IN ('PETUGAS_UPT', 'OPERATOR', 'ADMIN', 'admin', 'upt')
       GROUP BY u.user_id, u.name, u.email, u.role, u.position, u.department
       ORDER BY tickets_handled DESC, total_actions DESC, u.name ASC
-    `);
+    `, queryParams);
 
     const productivityList = rows.map(r => ({
       user_id: r.user_id,
@@ -322,6 +348,10 @@ export async function getOperatorProductivity(req, res) {
       status: 'success',
       code: 200,
       data: productivityList,
+      period: {
+        start_date: start_date || null,
+        end_date: end_date || null
+      },
       total_operators: productivityList.length
     });
   } catch (err) {

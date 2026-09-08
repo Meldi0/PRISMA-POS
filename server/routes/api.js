@@ -47,7 +47,9 @@ router.get('/roles', userController.getRoles);
 // -------------------------------------------------------------------------------------------------
 router.post('/auth/login', authController.login);
 router.post('/auth/mfa/verify', authController.verifyMfa);
+router.post('/auth/verify-mfa', authController.verifyMfa);
 router.post('/auth/mfa/resend', authController.resendMfaOtp);
+router.post('/auth/resend-mfa', authController.resendMfaOtp);
 router.post('/auth/register', authController.register);
 router.get('/auth/me', requireAuth, authController.getProfile);
 router.post('/auth/mfa/setup', requireAuth, authController.setupMfa);
@@ -102,6 +104,6 @@ router.get('/admin/db-status', requireAuth, analyticsController.getDbStatus);
 // 8. TICKETING MONITORING & ANALYTICS (Scoped)
 // -------------------------------------------------------------------------------------------------
 router.get('/analytics', requireAuth, requirePermission(['monitoring.view', 'analytics.view']), analyticsController.getAnalytics);
-router.get('/analytics/operator-productivity', requireAuth, requirePermission(['operator.stats_view', 'monitoring.view']), analyticsController.getOperatorProductivity);
+router.get('/analytics/operator-productivity', requireAuth, requirePermission('operator.stats_view'), analyticsController.getOperatorProductivity);
 
 export default router;

@@ -29,7 +29,8 @@ export async function getApprovals(req, res) {
         ra.reviewed_at, ra.reviewer_name, ra.created_at AS requested_at,
         u.user_id, u.name, u.email, u.position, u.nip,
         u.role, u.account_status, u.data_scope, u.region_id, u.office_id,
-        r.name AS region_name, o.name AS office_name
+        r.name AS region_name, r.code AS region_code,
+        o.name AS office_name, o.code AS office_code, o.code AS nopen_kc
       FROM registration_approvals ra
       JOIN users u ON ra.user_id = u.user_id
       LEFT JOIN regions r ON u.region_id = r.region_id

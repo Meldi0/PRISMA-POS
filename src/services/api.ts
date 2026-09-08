@@ -275,6 +275,8 @@ class PosoApiService {
     position?: string;
     nip?: string;
     nopen?: string;
+    office_name?: string;
+    kc_name?: string;
     user_type?: string;
     region_id?: string;
     office_id?: string;
@@ -555,8 +557,12 @@ class PosoApiService {
     return this.request('/analytics', { method: 'GET' });
   }
 
-  async getOperatorProductivity(): Promise<ApiResponse<OperatorProductivityItem[]>> {
-    return this.request<OperatorProductivityItem[]>('/analytics/operator-productivity', { method: 'GET' });
+  async getOperatorProductivity(startDate?: string, endDate?: string): Promise<ApiResponse<OperatorProductivityItem[]>> {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request<OperatorProductivityItem[]>(`/analytics/operator-productivity${qs}`, { method: 'GET' });
   }
 
   // -----------------------------------------------------------------------------------------------

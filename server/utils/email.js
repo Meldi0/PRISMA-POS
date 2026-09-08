@@ -22,24 +22,27 @@ export function isSmtpReady() {
   return Boolean(
     user &&
     pass &&
+    !user.includes('your-email') &&
     !user.includes('emailkamu@') &&
     !user.includes('your-account@') &&
+    !pass.includes('your-app-password') &&
     !pass.includes('xxxx') &&
     !pass.includes('YOUR_')
   );
 }
 
-export const isSmtpConfigured = isSmtpReady();
+export function getTransporter() {
+  if (!isSmtpReady()) return null;
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const port = Number(process.env.SMTP_PORT || 587);
+  const user = (process.env.SMTP_USER || '').trim();
+  const pass = (process.env.SMTP_PASS || '').trim();
 
-if (isSmtpReady()) {
-  transporter = nodemailer.createTransport({
-    host: smtpHost,
-    port: smtpPort,
-    secure: smtpPort === 465, // true for 465, false for 587 / other ports
-    auth: {
-      user: smtpUser,
-      pass: smtpPass
-    }
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass }
   });
 }
 
@@ -113,10 +116,13 @@ export async function sendOtpEmail({ toEmail, recipientName, otpCode }) {
   console.log(`[EMAIL OTP SENDER] KODE OTP: ${otpCode}`);
   console.log('=================================================================');
 
-  if (isSmtpConfigured && transporter) {
+  const currentTransporter = getTransporter();
+  const currentEmailFrom = process.env.EMAIL_FROM || (process.env.SMTP_USER ? `"PRISMA POS Kedinasan" <${process.env.SMTP_USER}>` : '"PRISMA POS Helpdesk" <no-reply@poso.local>');
+
+  if (currentTransporter) {
     try {
-      const info = await transporter.sendMail({
-        from: emailFrom,
+      const info = await currentTransporter.sendMail({
+        from: currentEmailFrom,
         to: toEmail,
         subject,
         html: htmlContent

@@ -12,7 +12,11 @@ export interface RegisterPayload {
   data_scope?: string;
   region_id?: string;
   office_id?: string;
+  nip?: string;
+  nopen?: string;
   nopen_kc?: string;
+  office_name?: string;
+  kc_name?: string;
 }
 
 interface AuthContextType {
@@ -228,7 +232,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           password: payload.password,
           phone: payload.phone,
           position: payload.position,
-          nopen: payload.nopen_kc,
+          nip: payload.nip,
+          nopen: payload.nopen || payload.nopen_kc,
+          office_name: payload.office_name,
+          kc_name: payload.kc_name,
           region_id: payload.region_id,
           office_id: payload.office_id
         };

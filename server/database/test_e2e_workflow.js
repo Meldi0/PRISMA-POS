@@ -41,23 +41,33 @@ async function runE2ETests() {
   console.log('================================================================\n');
 
   // ---------------------------------------------------------------------------
-  // 1. UJI LOGIN LANGSUNG (DIRECT LOGIN TANPA OTP)
+  // 1. UJI LOGIN AKUN ADMIN (PASSWORD + MFA)
   // ---------------------------------------------------------------------------
-  console.log('>>> 1. Menguji Login Langsung Akun Admin (Tanpa OTP)...');
+  console.log('>>> 1. Menguji Login Akun Admin (Password + MFA OTP)...');
   const loginRes = await request('/auth/login', { method: 'POST' }, {
     email: 'admin@poso.local',
     password: 'Admin123!'
   });
 
-  if (loginRes.status !== 200 || !loginRes.data?.data?.token) {
-    console.error('FAILED: Login Admin gagal!', loginRes);
+  if (loginRes.status !== 200 || !loginRes.data?.challenge_token) {
+    console.error('FAILED: Login password Admin gagal!', loginRes);
     process.exit(1);
   }
 
-  const adminToken = loginRes.data.data.token;
-  console.log('✓ Login Admin berhasil langsung!');
-  console.log(`  - Role: ${loginRes.data.data.user.role}`);
-  console.log(`  - Nama: ${loginRes.data.data.user.name}`);
+  const mfaRes = await request('/auth/verify-mfa', { method: 'POST' }, {
+    challenge_token: loginRes.data.challenge_token,
+    otp_code: '123456'
+  });
+
+  if (mfaRes.status !== 200 || !mfaRes.data?.data?.token) {
+    console.error('FAILED: Verifikasi MFA Admin gagal!', mfaRes);
+    process.exit(1);
+  }
+
+  const adminToken = mfaRes.data.data.token;
+  console.log('✓ Login Admin berhasil melalui MFA!');
+  console.log(`  - Role: ${mfaRes.data.data.user.role}`);
+  console.log(`  - Nama: ${mfaRes.data.data.user.name}`);
   console.log(`  - Token diterima (${adminToken.slice(0, 20)}...)\n`);
 
   // ---------------------------------------------------------------------------
@@ -141,12 +151,22 @@ async function runE2ETests() {
     password: 'PasswordBudi123!'
   });
 
-  if (budiLogin.status !== 200 || !budiLogin.data?.data?.token) {
+  if (budiLogin.status !== 200 || !budiLogin.data?.challenge_token) {
     console.error('FAILED: Login user baru gagal!', budiLogin);
     process.exit(1);
   }
-  const budiToken = budiLogin.data.data.token;
-  console.log('✓ User Budi berhasil login langsung tanpa OTP!');
+
+  const budiMfa = await request('/auth/verify-mfa', { method: 'POST' }, {
+    challenge_token: budiLogin.data.challenge_token,
+    otp_code: '123456'
+  });
+
+  if (budiMfa.status !== 200 || !budiMfa.data?.data?.token) {
+    console.error('FAILED: Verifikasi MFA Budi gagal!', budiMfa);
+    process.exit(1);
+  }
+  const budiToken = budiMfa.data.data.token;
+  console.log('✓ User Budi berhasil login dengan MFA!');
 
   // Buat tiket
   const createTicketRes = await request('/tickets', {

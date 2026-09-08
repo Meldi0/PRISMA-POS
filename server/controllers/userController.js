@@ -13,7 +13,8 @@ export async function getUsers(req, res) {
         u.data_scope, u.region_id, u.office_id, u.position, u.mfa_enabled,
         u.failed_attempts, u.locked_until, u.last_login_at, u.password_plain,
         u.nip, u.department, u.role_title, u.created_by, u.created_at, u.updated_at,
-        r.name AS region_name, o.name AS office_name
+        r.name AS region_name, r.code AS region_code,
+        o.name AS office_name, o.code AS office_code, o.code AS nopen_kc
       FROM users u
       LEFT JOIN regions r ON u.region_id = r.region_id
       LEFT JOIN offices o ON u.office_id = o.office_id

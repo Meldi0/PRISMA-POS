@@ -1,10 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
-import { apiService } from '../../services/api';
-import { Region, Office, UserRole } from '../../types';
-import { SearchableSelect } from '../../components/common/SearchableSelect';
+import { UserRole } from '../../types';
 import { 
   UserPlus, 
   ArrowLeft, 
@@ -19,9 +17,20 @@ import {
   Clock,
   ShieldCheck,
   Building,
-  BadgeCheck
+  BadgeCheck,
+  ChevronDown
 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
+
+const REGION_LIST = [
+  { id: 'REG-01', code: 'REG1', name: 'Regional 1 Sumatera Bagian Utara' },
+  { id: 'REG-02', code: 'REG2', name: 'Regional 2 Sumatera Bagian Barat & Selatan' },
+  { id: 'REG-03', code: 'REG3', name: 'Regional 3 Jawa Barat & Banten' },
+  { id: 'REG-04', code: 'REG4', name: 'Regional 4 DKI Jakarta & Jawa Tengah/DIY' },
+  { id: 'REG-05', code: 'REG5', name: 'Regional 5 Jawa Timur & Bali Nusra' },
+  { id: 'REG-06', code: 'REG6', name: 'Regional 6 Kalimantan, Sulawesi & Maluku Papua' },
+  { id: 'REG-PUSAT', code: 'PUSAT', name: 'Kantor Pusat Bandung' },
+];
 
 export const Register: React.FC = () => {
   // Form Fields
@@ -30,17 +39,12 @@ export const Register: React.FC = () => {
   const [nip, setNip] = useState('');
   const [phone, setPhone] = useState('');
   const [position, setPosition] = useState('');
-  const [selectedRegionId, setSelectedRegionId] = useState('');
-  const [selectedOfficeId, setSelectedOfficeId] = useState('');
+  const [selectedRegionId, setSelectedRegionId] = useState('REG-03');
+  const [officeName, setOfficeName] = useState('');
+  const [nopen, setNopen] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-
-  // Master Data
-  const [regions, setRegions] = useState<Region[]>([]);
-  const [offices, setOffices] = useState<Office[]>([]);
-  const [loadingRegions, setLoadingRegions] = useState(false);
-  const [loadingOffices, setLoadingOffices] = useState(false);
 
   // Status & Feedback States
   const [errorMsg, setErrorMsg] = useState('');
@@ -51,80 +55,6 @@ export const Register: React.FC = () => {
   const { register } = useAuth();
   const navigate = useNavigate();
   const { success, error: toastError } = useToast();
-
-  // Load Regions on Mount
-  useEffect(() => {
-    const fetchRegions = async () => {
-      setLoadingRegions(true);
-      try {
-        const res = await apiService.getRegions();
-        if (res.status === 'success' && res.data) {
-          setRegions(res.data);
-          const defaultReg = res.data.find(r => r.code === 'REG3' || r.code === 'REG-03') || res.data[0];
-          if (defaultReg) {
-            setSelectedRegionId(defaultReg.region_id);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load regions:', err);
-      } finally {
-        setLoadingRegions(false);
-      }
-    };
-
-    fetchRegions();
-  }, []);
-
-  // Load Offices whenever selected region changes
-  useEffect(() => {
-    if (!selectedRegionId) {
-      setOffices([]);
-      return;
-    }
-
-    const fetchOffices = async () => {
-      setLoadingOffices(true);
-      try {
-        const res = await apiService.getOffices(selectedRegionId);
-        if (res.status === 'success' && res.data) {
-          setOffices(res.data);
-          if (res.data.length > 0) {
-            setSelectedOfficeId(res.data[0].office_id);
-          } else {
-            setSelectedOfficeId('');
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load offices:', err);
-      } finally {
-        setLoadingOffices(false);
-      }
-    };
-
-    fetchOffices();
-  }, [selectedRegionId]);
-
-  const regionOptions = useMemo(
-    () =>
-      regions.map((reg) => ({
-        value: reg.region_id,
-        label: `${reg.code} - ${reg.name}`,
-        subLabel: `Kode: ${reg.code}`,
-        badge: reg.code,
-      })),
-    [regions]
-  );
-
-  const officeOptions = useMemo(
-    () =>
-      offices.map((off) => ({
-        value: off.office_id,
-        label: off.name,
-        subLabel: `Kode: ${off.code}`,
-        badge: off.type || 'KANTOR',
-      })),
-    [offices]
-  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,8 +70,13 @@ export const Register: React.FC = () => {
       return;
     }
 
-    if (!selectedOfficeId) {
-      setErrorMsg('Silakan pilih kantor pos penempatan dinas Anda.');
+    if (!officeName.trim()) {
+      setErrorMsg('Silakan ketik nama Kantor Pos / KC penempatan Anda.');
+      return;
+    }
+
+    if (!nopen.trim()) {
+      setErrorMsg('Silakan ketik Nopen / Kode Kantor Pos Anda.');
       return;
     }
 
@@ -149,7 +84,7 @@ export const Register: React.FC = () => {
 
     try {
       // In POSO, all staff self-register as UPT_LUAR (Office Staff / Pelapor)
-      // Office is captured via region_id and office_id
+      // Office is captured via manual text (office_name & nopen) and region_id
       const payload = {
         name: name.trim(),
         email: email.trim().toLowerCase(),
@@ -160,7 +95,10 @@ export const Register: React.FC = () => {
         role: 'UPT_LUAR' as UserRole,
         data_scope: 'OFFICE' as const,
         region_id: selectedRegionId,
-        office_id: selectedOfficeId
+        office_name: officeName.trim(),
+        kc_name: officeName.trim(),
+        nopen: nopen.trim(),
+        nopen_kc: nopen.trim()
       };
 
       const res = await register(payload);
@@ -310,7 +248,7 @@ export const Register: React.FC = () => {
 
                   <div>
                     <label className="block text-xs font-bold text-[#0F172A] mb-1.5">
-                      NIP / Nopen Pegawai <span className="text-[#EF4444]">*</span>
+                      Nomor Induk Pegawai (NIP) <span className="text-[#EF4444]">*</span>
                     </label>
                     <input
                       type="text"
@@ -369,38 +307,74 @@ export const Register: React.FC = () => {
                   />
                 </div>
 
-                {/* Row 4: Regional & Kantor Pos Penempatan */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="flex items-center justify-between text-xs font-bold text-[#0F172A] mb-1.5">
-                      <span>Wilayah Regional <span className="text-[#EF4444]">*</span></span>
-                      {loadingRegions && <span className="text-[10px] text-[#64748B]">Memuat...</span>}
-                    </label>
-                    <SearchableSelect
-                      options={regionOptions}
-                      value={selectedRegionId}
-                      onChange={(val) => setSelectedRegionId(val)}
-                      placeholder="Pilih Wilayah Regional..."
-                      searchPlaceholder="Cari regional..."
-                      required
-                    />
+                {/* Row 4: Penempatan Kedinasan (Ketik Manual KC & Nopen) */}
+                <div className="space-y-2 p-3.5 rounded-xl bg-[#F0F9FF]/60 border border-[#BAE6FD]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-[#083342] flex items-center gap-1.5">
+                      <Building size={14} className="text-[#0D5C75]" />
+                      <span>Unit Kerja Penempatan Kedinasan</span>
+                    </span>
+                    <span className="text-[10px] text-[#0369A1] font-semibold bg-white px-2 py-0.5 rounded border border-[#BAE6FD]">
+                      Input Manual Kedinasan
+                    </span>
                   </div>
 
-                  <div>
-                    <label className="flex items-center justify-between text-xs font-bold text-[#0F172A] mb-1.5">
-                      <span>Kantor Pos Penempatan <span className="text-[#EF4444]">*</span></span>
-                      {loadingOffices && <span className="text-[10px] text-[#64748B]">Memuat...</span>}
-                    </label>
-                    <SearchableSelect
-                      options={officeOptions}
-                      value={selectedOfficeId}
-                      onChange={(val) => setSelectedOfficeId(val)}
-                      placeholder="Pilih Kantor Pos..."
-                      searchPlaceholder="Cari nama kantor cabang, tipe, atau kode..."
-                      emptyMessage="Tidak ada kantor pos pada regional ini"
-                      required
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                    {/* Wilayah Regional */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-[#475569] mb-1">
+                        Wilayah Regional <span className="text-[#EF4444]">*</span>
+                      </label>
+                      <div className="relative">
+                        <select
+                          value={selectedRegionId}
+                          onChange={(e) => setSelectedRegionId(e.target.value)}
+                          className="w-full h-11 px-3 pr-8 rounded-xl bg-white border border-[#CBD5E1] text-xs text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#0D5C75]/20 focus:border-[#0D5C75] appearance-none transition-all cursor-pointer font-medium"
+                        >
+                          {REGION_LIST.map((reg) => (
+                            <option key={reg.id} value={reg.id}>
+                              {reg.code} - {reg.name}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown size={15} className="text-[#94A3B8] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      </div>
+                    </div>
+
+                    {/* Kantor Cabang / Kantor Pos */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-[#475569] mb-1">
+                        Kantor Cabang / Pos (KC / KCU) <span className="text-[#EF4444]">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Cth: KCU Bandung / KC Garut"
+                        value={officeName}
+                        onChange={(e) => setOfficeName(e.target.value)}
+                        className="w-full h-11 px-3.5 rounded-xl bg-white border border-[#CBD5E1] text-xs sm:text-sm text-[#0F172A] placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#0D5C75]/20 focus:border-[#0D5C75] transition-all"
+                      />
+                    </div>
+
+                    {/* Nopen / Kode Kantor */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-[#475569] mb-1">
+                        Nopen / Kode Kantor <span className="text-[#EF4444]">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Cth: 40000 / 46100"
+                        value={nopen}
+                        onChange={(e) => setNopen(e.target.value)}
+                        className="w-full h-11 px-3.5 rounded-xl bg-white border border-[#CBD5E1] text-xs sm:text-sm text-[#0F172A] placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#0D5C75]/20 focus:border-[#0D5C75] transition-all"
+                      />
+                    </div>
                   </div>
+
+                  <p className="text-[11px] text-[#0369A1]/90 pt-0.5">
+                    💡 Ketik nama KC dan nomor nopen kantor pos Anda. Sistem akan merekap akun ke unit kerja tersebut secara otomatis tanpa perlu pemilihan dari database master.
+                  </p>
                 </div>
 
                 {/* Password & Confirm Password */}

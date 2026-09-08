@@ -129,7 +129,7 @@ export const SageSidebar: React.FC<SageSidebarProps> = ({
         label: 'Lacak Tiket' 
       },
     ] : []),
-    ...(hasPermission('monitoring.view') || hasPermission('analytics.view') ? [
+    ...((hasPermission('sla.view') || hasPermission('operator.stats_view')) ? [
       { 
         id: 'reports' as DashboardViewType, 
         icon: BarChart3, 

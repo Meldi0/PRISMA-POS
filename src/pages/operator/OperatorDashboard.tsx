@@ -18,6 +18,7 @@ import {
   Clock,
   Zap,
   Shield,
+  ShieldAlert,
   Layers,
   Archive,
   X
@@ -95,6 +96,13 @@ export const OperatorDashboard: React.FC = () => {
       realtimeService.setUserContext(user.user_id, user.name);
     }
   }, [user]);
+
+  // Auto fallback if user is in reports but lacks both SLA and productivity view permissions
+  useEffect(() => {
+    if (activeView === 'reports' && !hasPermission('sla.view') && !hasPermission('operator.stats_view')) {
+      setActiveView('tickets');
+    }
+  }, [activeView, hasPermission]);
 
   // Open ticket directly from notifications or floating chat badge
   const handleOpenTicketById = async (ticketId: string) => {
@@ -570,42 +578,58 @@ export const OperatorDashboard: React.FC = () => {
             )}
 
             {activeView === 'reports' && (
-              <div className="space-y-6">
-                {/* SLA Compliance Summary */}
-                <div className="bg-white rounded-[16px] border border-[#E2E8F0]/80 p-6 shadow-sm space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-[10px] bg-[#EAF4F8] flex items-center justify-center text-[#0D5C75]">
-                      <BarChart3 size={20} />
-                    </div>
-                    <div>
-                      <h3 className="text-[16px] font-bold text-[#0F172A]">Laporan Kepatuhan SLA & Ringkasan Kinerja</h3>
-                      <p className="text-[12px] text-[#64748B]">Rekapitulasi beban kerja dan waktu penyelesaian tiket nasional</p>
-                    </div>
+              (!hasPermission('sla.view') && !hasPermission('operator.stats_view')) ? (
+                <div className="bg-white rounded-[16px] border border-[#E2E8F0] p-10 shadow-xs text-center max-w-xl mx-auto space-y-4 my-8">
+                  <div className="w-16 h-16 rounded-full bg-rose-50 border border-rose-200 flex items-center justify-center mx-auto text-rose-600">
+                    <ShieldAlert size={32} />
                   </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-                    <div className="p-4 rounded-[12px] bg-[#F8FAFC] border border-[#E2E8F0] space-y-1">
-                      <span className="text-[11px] font-bold text-[#64748B] uppercase">Tingkat Resolusi</span>
-                      <p className="text-[24px] font-bold text-[#10B981]">
-                        {stats.total > 0 ? Math.round(((stats.closed + stats.archived) / stats.total) * 100) : 100}%
-                      </p>
-                    </div>
-
-                    <div className="p-4 rounded-[12px] bg-[#F8FAFC] border border-[#E2E8F0] space-y-1">
-                      <span className="text-[11px] font-bold text-[#64748B] uppercase">Rata-Rata Respons</span>
-                      <p className="text-[24px] font-bold text-[#0D5C75]">≤ 1.8 Jam</p>
-                    </div>
-
-                    <div className="p-4 rounded-[12px] bg-[#F8FAFC] border border-[#E2E8F0] space-y-1">
-                      <span className="text-[11px] font-bold text-[#64748B] uppercase">Tiket Lewat SLA</span>
-                      <p className="text-[24px] font-bold text-[#059669]">0 Tiket</p>
-                    </div>
+                  <div className="space-y-1.5">
+                    <h3 className="text-lg font-bold text-[#0F172A]">Akses Halaman Dibatasi</h3>
+                    <p className="text-sm text-[#64748B] leading-relaxed">
+                      Anda tidak memiliki izin untuk melihat laporan kepatuhan SLA maupun rekapitulasi produktivitas operator. Hubungi Administrator untuk memperbarui hak akses Anda.
+                    </p>
                   </div>
                 </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* SLA Compliance Summary (Requires sla.view permission) */}
+                  {hasPermission('sla.view') && (
+                    <div className="bg-white rounded-[16px] border border-[#E2E8F0]/80 p-6 shadow-sm space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-[10px] bg-[#EAF4F8] flex items-center justify-center text-[#0D5C75]">
+                          <BarChart3 size={20} />
+                        </div>
+                        <div>
+                          <h3 className="text-[16px] font-bold text-[#0F172A]">Laporan Kepatuhan SLA & Ringkasan Kinerja</h3>
+                          <p className="text-[12px] text-[#64748B]">Rekapitulasi beban kerja dan waktu penyelesaian tiket nasional</p>
+                        </div>
+                      </div>
 
-                {/* Operator Activity Recap Table (Khusus Atasan / Manager) */}
-                <OperatorProductivityTable />
-              </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+                        <div className="p-4 rounded-[12px] bg-[#F8FAFC] border border-[#E2E8F0] space-y-1">
+                          <span className="text-[11px] font-bold text-[#64748B] uppercase">Tingkat Resolusi</span>
+                          <p className="text-[24px] font-bold text-[#10B981]">
+                            {stats.total > 0 ? Math.round(((stats.closed + stats.archived) / stats.total) * 100) : 100}%
+                          </p>
+                        </div>
+
+                        <div className="p-4 rounded-[12px] bg-[#F8FAFC] border border-[#E2E8F0] space-y-1">
+                          <span className="text-[11px] font-bold text-[#64748B] uppercase">Rata-Rata Respons</span>
+                          <p className="text-[24px] font-bold text-[#0D5C75]">≤ 1.8 Jam</p>
+                        </div>
+
+                        <div className="p-4 rounded-[12px] bg-[#F8FAFC] border border-[#E2E8F0] space-y-1">
+                          <span className="text-[11px] font-bold text-[#64748B] uppercase">Tiket Lewat SLA</span>
+                          <p className="text-[24px] font-bold text-[#059669]">0 Tiket</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Operator Activity Recap Table (Khusus Atasan / Manager) */}
+                  <OperatorProductivityTable />
+                </div>
+              )
             )}
           </div>
         </main>

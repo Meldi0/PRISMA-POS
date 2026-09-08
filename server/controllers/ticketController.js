@@ -334,8 +334,26 @@ export async function createTicket(req, res) {
     }
 
     // Otomatisasi data regional dan kantor: prioritaskan identitas akun dinas yang sedang login
-    const finalRegionId = (user && user.region_id) ? user.region_id : (region_id || 'REG-03');
-    const finalOfficeId = (user && user.office_id) ? user.office_id : (office_id || 'OFC-KCU-BDG');
+    let finalRegionId = null;
+    let finalOfficeId = null;
+
+    if (user) {
+      finalRegionId = user.region_id || null;
+      finalOfficeId = user.office_id || null;
+
+      // Jika di session belum lengkap, query database akun secara langsung
+      if (!finalRegionId || !finalOfficeId) {
+        const [uRows] = await pool.query('SELECT region_id, office_id FROM users WHERE user_id = ?', [user.user_id]);
+        if (uRows.length > 0) {
+          finalRegionId = finalRegionId || uRows[0].region_id;
+          finalOfficeId = finalOfficeId || uRows[0].office_id;
+        }
+      }
+    }
+
+    // Fallback hanya berlaku jika publik tanpa login atau akun belum diset kantornya
+    if (!finalRegionId) finalRegionId = region_id || 'REG-03';
+    if (!finalOfficeId) finalOfficeId = office_id || 'OFC-KCU-BDG';
 
     // Generate Ticket ID
     const today = new Date();
