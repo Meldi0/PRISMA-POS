@@ -106,4 +106,10 @@ router.get('/admin/db-status', requireAuth, analyticsController.getDbStatus);
 router.get('/analytics', requireAuth, requirePermission(['monitoring.view', 'analytics.view']), analyticsController.getAnalytics);
 router.get('/analytics/operator-productivity', requireAuth, requirePermission('operator.stats_view'), analyticsController.getOperatorProductivity);
 
+// -------------------------------------------------------------------------------------------------
+// 9. TELEGRAM BOT GATEWAY
+// -------------------------------------------------------------------------------------------------
+router.get('/admin/telegram/status', requireAuth, requirePermission(['system.config', 'audit.view']), analyticsController.getTelegramStatus);
+router.post('/admin/telegram/test', requireAuth, requirePermission(['system.config']), analyticsController.testTelegramNotification);
+
 export default router;

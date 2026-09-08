@@ -592,6 +592,18 @@ class PosoApiService {
       method: 'GET'
     });
   }
+
+  // -----------------------------------------------------------------------------------------------
+  // TELEGRAM BOT GATEWAY
+  // -----------------------------------------------------------------------------------------------
+
+  async getTelegramStatus(): Promise<ApiResponse<any>> {
+    return this.request<any>('/admin/telegram/status', { method: 'GET' });
+  }
+
+  async testTelegramNotification(): Promise<ApiResponse<any>> {
+    return this.request<any>('/admin/telegram/test', { method: 'POST', body: JSON.stringify({}) });
+  }
 }
 
 export const apiService = new PosoApiService();

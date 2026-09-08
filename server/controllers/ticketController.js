@@ -1,5 +1,11 @@
 import { pool } from '../config/db.js';
 import { buildDataScopeFilter } from '../utils/permissions.js';
+import { 
+  sendTicketCreatedAlert, 
+  sendTicketStatusAlert, 
+  sendTicketReopenAlert, 
+  sendNewReplyAlert 
+} from '../utils/telegram.js';
 
 export function isUptUnitMatch(userUnit, ticketUnit) {
   if (!userUnit || !ticketUnit) return false;
@@ -417,6 +423,24 @@ export async function createTicket(req, res) {
       is_archived: Boolean(newTicket[0].is_archived)
     };
 
+    // Kirim notifikasi Telegram secara asynchronous non-blocking
+    try {
+      pool.query(
+        `SELECT o.name AS office_name, o.code AS office_code, r.name AS region_name 
+         FROM offices o 
+         LEFT JOIN regions r ON o.region_id = r.region_id 
+         WHERE o.office_id = ? LIMIT 1`,
+        [finalOfficeId]
+      ).then(([officeDetails]) => {
+        const meta = officeDetails && officeDetails[0] ? officeDetails[0] : {};
+        sendTicketCreatedAlert(ticketData, meta).catch(err => {
+          console.warn('[Telegram Alert Error]', err.message);
+        });
+      }).catch(err => {
+        console.warn('[Telegram Meta Fetch Error]', err.message);
+      });
+    } catch (e) {}
+
     return res.status(201).json({
       status: 'success',
       code: 201,
@@ -528,6 +552,19 @@ export async function updateTicketStatus(req, res) {
 
     const [updatedTicket] = await pool.query('SELECT * FROM tickets WHERE ticket_id = ?', [id]);
 
+    // Kirim notifikasi Telegram jika status berubah
+    if (status && status !== ticket.status) {
+      try {
+        const ticketInfo = {
+          ...(updatedTicket[0] || ticket),
+          office_name: ticket.office_name || ticket.office_id
+        };
+        sendTicketStatusAlert(ticketInfo, ticket.status, status, user ? user.name : 'Petugas UPT', note).catch(err => {
+          console.warn('[Telegram Status Alert Error]', err.message);
+        });
+      } catch (e) {}
+    }
+
     return res.status(200).json({
       status: 'success',
       message: 'Status tiket berhasil diperbarui.',
@@ -610,6 +647,15 @@ export async function addThreadMessage(req, res) {
     } catch (e) {}
 
     const [newThread] = await pool.query('SELECT * FROM threads WHERE thread_id = ?', [threadId]);
+
+    // Kirim notifikasi Telegram untuk balasan publik
+    if (finalVisibility === 'public') {
+      try {
+        sendNewReplyAlert(ticket, senderName, senderRole, message.trim(), 'public').catch(err => {
+          console.warn('[Telegram Thread Alert Error]', err.message);
+        });
+      } catch (e) {}
+    }
 
     return res.status(201).json({
       status: 'success',
@@ -702,6 +748,13 @@ export async function requestTicketReopen(req, res) {
       ]);
     } catch (e) {}
 
+    // Kirim alert Telegram untuk permohonan reopen
+    try {
+      sendTicketReopenAlert(ticket, requesterName, reason.trim()).catch(err => {
+        console.warn('[Telegram Reopen Alert Error]', err.message);
+      });
+    } catch (e) {}
+
     return res.status(200).json({
       status: 'success',
       code: 200,
@@ -787,7 +840,15 @@ export async function reviewTicketReopen(req, res) {
         ]);
       } catch (e) {}
 
-      return res.status(200).json({
+      // Kirim notifikasi Telegram atas hasil review reopen
+    try {
+      const newStatusLabel = action === 'APPROVE' ? 'open (Reopen Disetujui)' : 'closed (Reopen Ditolak)';
+      sendTicketStatusAlert(ticket, 'closed', newStatusLabel, user.name, note || (action === 'APPROVE' ? 'Permohonan buka kembali disetujui' : 'Permohonan buka kembali ditolak')).catch(err => {
+        console.warn('[Telegram Reopen Review Alert Error]', err.message);
+      });
+    } catch (e) {}
+
+    return res.status(200).json({
         status: 'success',
         message: 'Permohonan buka kembali tiket berhasil disetujui. Tiket kini berstatus Open dan percakapan kembali aktif.',
         data: { ticket_id: id, status: 'open', reopen_status: 'APPROVED' }

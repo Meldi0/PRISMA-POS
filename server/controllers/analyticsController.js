@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { buildDataScopeFilter } from '../utils/permissions.js';
+import { getTelegramConfig, getBotInfo, sendTestMessage } from '../utils/telegram.js';
 
 export async function getAnalytics(req, res) {
   try {
@@ -364,3 +365,95 @@ export async function getOperatorProductivity(req, res) {
   }
 }
 
+/**
+ * GET /api/admin/telegram/status
+ * Mengembalikan status konfigurasi Telegram Bot Gateway (tanpa membocorkan token rahasia)
+ */
+export async function getTelegramStatus(req, res) {
+  try {
+    const config = getTelegramConfig();
+    let botInfo = null;
+
+    if (config.configured) {
+      botInfo = await getBotInfo();
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        enabled: config.enabled,
+        configured: config.configured,
+        maskedToken: config.maskedToken || null,
+        chatId: config.chatId || null,
+        baseUrl: config.baseUrl,
+        bot: botInfo ? {
+          id: botInfo.id,
+          firstName: botInfo.firstName,
+          username: botInfo.username,
+          canJoinGroups: botInfo.canJoinGroups
+        } : null,
+        setupGuide: !config.configured ? {
+          step1: 'Buka Telegram → Cari @BotFather → Ketik /newbot',
+          step2: 'Ikuti instruksi, beri nama bot (cth: PRISMA POS Alert Bot)',
+          step3: 'Salin BOT TOKEN ke .env: TELEGRAM_BOT_TOKEN=...',
+          step4: 'Tambahkan bot ke grup/channel tim helpdesk Anda',
+          step5: 'Cek Chat ID via @userinfobot → TELEGRAM_CHAT_ID=...',
+          step6: 'Set TELEGRAM_NOTIF_ENABLED=true, restart server, lalu klik "Test Ping"'
+        } : null
+      }
+    });
+  } catch (err) {
+    console.error('Error in getTelegramStatus:', err);
+    return res.status(500).json({
+      status: 'error',
+      code: 500,
+      message: 'Gagal memuat status Telegram Bot Gateway.'
+    });
+  }
+}
+
+/**
+ * POST /api/admin/telegram/test
+ * Mengirim pesan uji coba ke grup/channel Telegram yang terdaftar
+ */
+export async function testTelegramNotification(req, res) {
+  try {
+    const user = req.user;
+    const config = getTelegramConfig();
+
+    if (!config.configured) {
+      return res.status(400).json({
+        status: 'error',
+        code: 400,
+        message: 'Telegram Bot Gateway belum dikonfigurasi. Pastikan TELEGRAM_BOT_TOKEN dan TELEGRAM_CHAT_ID sudah diisi di file .env.'
+      });
+    }
+
+    const operatorName = user ? user.name : 'Administrator PRISMA POS';
+    const result = await sendTestMessage(operatorName);
+
+    if (result && result.ok) {
+      return res.status(200).json({
+        status: 'success',
+        message: `Pesan uji coba berhasil dikirim ke Telegram Chat ID: ${config.chatId}. Periksa grup/channel Telegram Anda!`,
+        data: {
+          message_id: result.result ? result.result.message_id : null,
+          chat_id: config.chatId
+        }
+      });
+    } else {
+      return res.status(500).json({
+        status: 'error',
+        code: 500,
+        message: `Gagal mengirim pesan ke Telegram: ${result?.description || 'Periksa kembali BOT_TOKEN dan CHAT_ID di .env'}`
+      });
+    }
+  } catch (err) {
+    console.error('Error in testTelegramNotification:', err);
+    return res.status(500).json({
+      status: 'error',
+      code: 500,
+      message: 'Gagal mengirim uji coba notifikasi Telegram.'
+    });
+  }
+}
