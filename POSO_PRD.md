@@ -1,8 +1,8 @@
 # Product Requirements Document (PRD)
-## Aplikasi: PRISMA POS — Pos Resolution & Integrated Service Management Application (v2.6.0)
+## Aplikasi: PRISMA POS — Pos Resolution & Integrated Service Management Application (v2.7.0)
 ### Sistem Helpdesk & Manajemen Tiket Terpadu PT Pos Indonesia (Persero)
 
-**Versi:** 2.6.0 (Telegram Bot Gateway, MFA OTP Email, Rekap Produktivitas Operator, Otomasi Regional, Kunci Chat & Reopen Tiket)  
+**Versi:** 2.7.0 (Dynamic Database Switcher, Telegram Bot Gateway, MFA OTP Email, Rekap Produktivitas Operator, Otomasi Regional, Kunci Chat & Reopen Tiket)  
 **Status:** Live & Production Ready  
 **Tipe Dokumen:** Product Requirements & Technical Specification Document  
 
@@ -28,6 +28,7 @@ Sistem ini dibangun dengan arsitektur modern **React 18 + TypeScript + Vite** pa
 10. **Otomasi Data Regional & Kantor**: Data Wilayah Regional dan Kantor Cabang otomatis terisi dari profil akun login; tidak ada dropdown manual pada form pengajuan tiket.
 11. **Kunci Chat Tiket Tutup & Mekanisme Buka Kembali**: Chat pelapor dinonaktifkan saat tiket berstatus Closed. Pelapor dapat mengajukan permohonan buka kembali. Operator meninjau dan memutuskan (Setujui / Tolak).
 12. **Telegram Bot Gateway (Notifikasi Real-Time Helpdesk)**: Gateway pesan instan eksternal ke grup tim helpdesk PT Pos Indonesia untuk respon cepat terhadap tiket darurat (prioritas URGENT & HIGH), perubahan status, balasan tiket, dan permohonan buka kembali tiket.
+13. **Dynamic Database Switcher & Web Configuration (Online Cloud & Offline Local)**: Panel konfigurasi dan peralihan database terpadu berbasis web eksklusif bagi Administrator. Memungkinkan transisi instan (*hot-swap*) antara klaster cloud Aiven MySQL (SSL Mode Required) dan database lokal (Localhost/XAMPP/MariaDB/Intranet) tanpa restart server, lengkap dengan uji koneksi target, persistensi otomatis ke file `.env`, serta alat inisialisasi skema tabel sekali klik (*One-Click Migration Tool*).
 
 ---
 
@@ -43,8 +44,8 @@ Sistem ini dibangun dengan arsitektur modern **React 18 + TypeScript + Vite** pa
 | **Notifikasi Browser** | Web Push / Notification API | Pemberitahuan desktop saat tab browser berada di latar belakang (*background*) |
 | **Backend Framework** | Node.js + Express 5.x (`server/`) | Arsitektur RESTful modular: JWT auth, RBAC granular middleware, connection pooling |
 | **Serverless Engine** | Vercel Serverless Functions (`api/index.js`) | Handler serverless otomatis via `vercel.json` dengan full security headers |
-| **Basis Data Master** | Aiven for MySQL 8.0 (`defaultdb`) | Cloud Managed Relational DB: 12 tabel master, transaksional, indexing performa tinggi |
-| **Keamanan Jaringan** | TLS 1.3 / SSL Mode: REQUIRED | Enkripsi end-to-end koneksi database Aiven dengan validasi sertifikat CA |
+| **Basis Data Master** | Dual-Mode: Aiven for MySQL 8.0 (Online, SSL REQUIRED) / MySQL 5.7+ / MariaDB 10.3+ / XAMPP (Offline) | Relational Database didukung Dynamic Pool Proxy (`server/config/db.js`) untuk peralihan instan (*hot-swap*) tanpa downtime |
+| **Keamanan Jaringan** | TLS 1.3 / SSL Mode: REQUIRED (Cloud) & Plaintext (Lokal) | Enkripsi end-to-end koneksi database Aiven dengan validasi sertifikat CA (`ca.pem`), serta opsi non-SSL untuk lokal |
 | **Enkripsi Kredensial** | BCrypt.js (Salt rounds: 10) + JWT | Penyimpanan hash kata sandi dan penandatanganan token otentikasi sesi kedinasan |
 | **Otentikasi Dua Faktor** | Speakeasy / Native TOTP Engine | Algoritma RFC 6238 TOTP, QR-code provisioning, dan verifikasi OTP 6 digit |
 | **Layanan Surat Elektronik** | Nodemailer (SMTP Client) | Pengiriman kode OTP login dan notifikasi dinas via SMTP (Gmail / Corporate Mailer) |
@@ -392,3 +393,9 @@ Workstation utama dengan 8 sub-tampilan (*Views*) yang dikontrol oleh otorisasi 
 ### 6.7 Telegram Bot Gateway & Notifikasi Eksternal
 - `GET /api/admin/telegram/status` *(Admin)*: Mengambil status konfigurasi Telegram Bot Gateway (apakah token & chat ID terisi, bot info getMe, dan status aktif/nonaktif tanpa membocorkan token).
 - `POST /api/admin/telegram/test` *(Admin)*: Mengirimkan pesan uji coba diagnostik (test ping) ke grup Telegram terdaftar untuk validasi konektivitas.
+
+### 6.8 Konfigurasi Basis Data Dinamis & Migrasi Skema
+- `GET /api/admin/db-config` *(Admin Only)*: Mengambil konfigurasi database aktif (dengan masking password) dan preset cepat (**Mode Online Aiven** vs **Mode Offline Localhost**).
+- `POST /api/admin/db-config/test` *(Admin Only)*: Menguji koneksi sementara ke target host/port MySQL tanpa mengubah database aktif (mengembalikan latensi ms, versi MySQL, dan verifikasi 14 tabel sistem).
+- `POST /api/admin/db-config/save` *(Admin Only)*: Memvalidasi target, mengalihkan pool koneksi aktif seketika (*hot-swap*), memperbarui file `.env`, dan mencatat log audit forensik `DATABASE_CONFIG_CHANGED`.
+- `POST /api/admin/db-config/migrate` *(Admin Only)*: Menjalankan eksekusi migrasi DDL skema 14 tabel master dan seeding data pengguna dinas bawaan pada database yang sedang aktif.

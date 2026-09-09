@@ -5,6 +5,7 @@ import * as ticketController from '../controllers/ticketController.js';
 import * as userController from '../controllers/userController.js';
 import * as approvalController from '../controllers/approvalController.js';
 import * as analyticsController from '../controllers/analyticsController.js';
+import * as dbConfigController from '../controllers/dbConfigController.js';
 import { pool } from '../config/db.js';
 
 const router = express.Router();
@@ -99,6 +100,12 @@ router.get('/admin/audit-logs', requireAuth, requirePermission(['audit.view', 'a
 router.get('/admin/features', requireAuth, analyticsController.getFeatureFlags);
 router.put('/admin/features', requireAuth, requireRole(['ADMIN', 'ADMIN_PUSAT', 'admin']), analyticsController.updateFeatureFlags);
 router.get('/admin/db-status', requireAuth, analyticsController.getDbStatus);
+
+// Database Configuration & Switcher (Role Admin Only)
+router.get('/admin/db-config', requireAuth, requireRole(['ADMIN', 'ADMIN_PUSAT', 'admin']), dbConfigController.getDbConfig);
+router.post('/admin/db-config/test', requireAuth, requireRole(['ADMIN', 'ADMIN_PUSAT', 'admin']), dbConfigController.testDbConfig);
+router.post('/admin/db-config/save', requireAuth, requireRole(['ADMIN', 'ADMIN_PUSAT', 'admin']), dbConfigController.saveDbConfig);
+router.post('/admin/db-config/migrate', requireAuth, requireRole(['ADMIN', 'ADMIN_PUSAT', 'admin']), dbConfigController.migrateDbSchema);
 
 // -------------------------------------------------------------------------------------------------
 // 8. TICKETING MONITORING & ANALYTICS (Scoped)

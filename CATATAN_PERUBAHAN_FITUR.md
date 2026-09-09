@@ -2,6 +2,53 @@
 
 ---
 
+## 🔄 Versi 2.7.0 — Dynamic Database Switcher & Web Configuration (Online Cloud & Offline Local)
+**Tanggal Rilis**: 9 September 2026  
+**Versi**: 2.7.0  
+**Disiapkan oleh**: Tim Pengembang PRISMA POS
+
+### Ringkasan Pembaruan v2.7.0
+Pembaruan versi 2.7.0 menghadirkan **Dynamic Database Switcher & Web Configuration**, sistem manajemen dan pergantian basis data langsung melalui Web Dashboard PRISMA POS. Fitur ini dirancang khusus untuk mempermudah administrator dalam mengonfigurasi dan mengalihkan koneksi basis data antara **Mode Online (Cloud Aiven MySQL)** dan **Mode Offline (Localhost / XAMPP / MariaDB / On-Premise)** secara instan (*hot-swap*) tanpa perlu menyunting file server atau mematikan proses backend secara manual.
+
+### Fitur Utama Pembaruan v2.7.0:
+1. **Restriksi Akses Eksklusif Role Administrator (`ADMIN`)**:
+   - Menu dan halaman **Konfigurasi Database** diproteksi secara ketat di sisi antarmuka pengguna (`SageSidebar.tsx` & `OperatorDashboard.tsx`) sehingga hanya tampak bagi akun dengan wewenang Admin.
+   - Seluruh endpoint API backend dilindungi middleware `requireAuth` dan `requireRole(['ADMIN', 'ADMIN_PUSAT', 'admin'])`. Percobaan akses oleh peran non-admin (seperti Petugas UPT atau Staf Cabang) otomatis ditolak dengan status HTTP `403 Forbidden`.
+
+2. **Preset 1-Klik Cepat (Quick Switch Presets)**:
+   - 🌐 **Mode Online (Cloud Aiven MySQL)**: Otomatis mengisi host klaster cloud Aiven, port `21970`, database `defaultdb`, username `avnadmin`, dan mengaktifkan saklar SSL/TLS (menggunakan `ca.pem`).
+   - 💻 **Mode Offline (Localhost / XAMPP / MariaDB)**: Otomatis mengisi host `localhost` / `127.0.0.1`, port standar `3306`, database `poso_helpdesk`, username `root`, dan menonaktifkan SSL.
+   - ⚙️ **Kustom (Manual)**: Memungkinkan pengisian parameter host, port, database, dan kredensial kustom sesuai arsitektur jaringan intranet kantor pos.
+
+3. **Uji Koneksi Target Diagnostik (Test Ping)**:
+   - Tombol **"Uji Koneksi Target"** melakukan koneksi uji coba sementara ke server target tanpa mengganggu atau memutus koneksi aktif saat ini.
+   - Menampilkan umpan balik visual instan: latensi ping respon (ms), versi rilis server MySQL, verifikasi 14 tabel sistem, serta deteksi otomatis jika database target baru masih kosong.
+   - Opsi otomatisasi: *Checkbox* pembuatan database otomatis di server target (`CREATE DATABASE IF NOT EXISTS`) apabila database belum tersedia.
+
+4. **Peralihan Dinamis Tanpa Restart (*Hot-Swap Dynamic Pool*) & Persistensi `.env`**:
+   - Backend menggunakan JavaScript `Proxy` pada objek `pool` di `server/config/db.js`. Saat database dialihkan, pool lama ditutup secara anggun (*graceful close*) dan pool baru langsung menggantikannya secara transparan.
+   - Seluruh modul dan controller sistem (`tickets`, `users`, `auth`, `audit_logs`) langsung tersambung ke database baru tanpa restart proses Node.js.
+   - Konfigurasi baru otomatis disimpan ke file `.env` root, menjamin pengaturan tetap bertahan saat server dinyalakan ulang.
+   - Setiap aktivitas pergantian database terekam otomatis ke dalam tabel `audit_logs` (`DATABASE_CONFIG_CHANGED`) lengkap dengan identitas aktor, waktu, dan IP address.
+
+5. **Inisialisasi Skema Tabel & Akun Master Sekali Klik (One-Click Migration Tool)**:
+   - Tombol **"Inisialisasi Skema & Akun"** dengan modal konfirmasi interaktif di dalam panel admin.
+   - Memungkinkan admin yang baru beralih ke database lokal kosong untuk langsung membuat seluruh struktur 14 tabel master dan melakukan seeding akun demo dinas tanpa perlu membuka terminal CLI.
+
+### File yang Dibuat & Dimodifikasi (v2.7.0)
+| File | Status | Keterangan Perubahan |
+|---|---|---|
+| `server/controllers/dbConfigController.js` | **BARU** | Controller backend untuk `getDbConfig`, `testDbConfig`, `saveDbConfig`, dan `migrateDbSchema`. |
+| `server/config/db.js` | Dimodifikasi | Implementasi Dynamic Pool Proxy, fungsi pengujian `testDbConnection`, peralihan hot-swap `switchDatabasePool`, dan persistensi `.env`. |
+| `server/database/migrate.js` | Dimodifikasi | Penambahan guard eksekusi CLI (`isDirectRun`) agar fungsi `runMigration` dapat di-import dan dieksekusi secara aman oleh API. |
+| `server/controllers/analyticsController.js` | Dimodifikasi | Pembaruan `getDbStatus` agar dinamis mendeteksi nama engine (Cloud vs Localhost), status mode, dan penghitungan tabel yang toleran terhadap skema kosong. |
+| `server/routes/api.js` | Dimodifikasi | Pendaftaran rute baru: `GET/POST /api/admin/db-config/*` dengan proteksi ketat `requireRole(['ADMIN', 'ADMIN_PUSAT', 'admin'])`. |
+| `src/services/api.ts` | Dimodifikasi | Penambahan method API client: `getDbConfig()`, `testDbConfig()`, `saveDbConfig()`, dan `migrateDbSchema()`. |
+| `src/components/admin/DataSourceConfig.tsx` | Dimodifikasi | Redesain panel antarmuka: Form konfigurasi interaktif, preset Online/Offline/Kustom, eye toggle password, pengujian koneksi, modal migrasi, dan badge status dinamis. |
+| `src/components/operator/SageSidebar.tsx` | Dimodifikasi | Pembaruan label navigasi sidebar dari *Database Aiven* menjadi *Konfigurasi Database*. |
+
+---
+
 ## 🚀 Versi 2.6.0 — Telegram Bot Gateway & Notifikasi Real-Time Helpdesk
 **Tanggal Rilis**: 8 September 2026  
 **Versi**: 2.6.0  

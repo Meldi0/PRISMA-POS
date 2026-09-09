@@ -1,8 +1,8 @@
 # Business Requirements Document (BRD)
-## Aplikasi: PRISMA POS — Pos Resolution & Integrated Service Management Application (v3.2)
+## Aplikasi: PRISMA POS — Pos Resolution & Integrated Service Management Application (v3.3)
 ### Sistem Helpdesk & Manajemen Tiket Terpadu PT Pos Indonesia (Persero)
 
-**Versi:** 3.2 (Enterprise Security, 3 Official Roles, Office Scope Isolation, & Governance Release)  
+**Versi:** 3.3 (Dynamic Database Switcher, Enterprise Security, 3 Official Roles, Office Scope Isolation, & Governance Release)  
 **Status:** Implemented & Production Ready  
 **Tipe Dokumen:** Business Requirements Document (BRD)  
 **Target Pengguna:** Seluruh Satuan Kerja PT Pos Indonesia (Persero) — Kantor Pusat, Regional, KCU, KC, KCP, dan Unit Pelaksana Teknis  
@@ -46,6 +46,8 @@ Untuk menjawab kebutuhan tata kelola operasional skala nasional tersebut, dikemb
    Menerapkan Multi-Factor Authentication (MFA / 2FA TOTP) dengan kapabilitas reset instan oleh admin, pencatatan otomatis jejak audit forensik (`audit_logs`) pada setiap aksi krusial, dan enkripsi koneksi database TLS 1.3 / SSL Mode: REQUIRED.
 8. **Pemisahan Papan Kerja Aktif & Arsip Tiket Mandiri**:
    Menyediakan Papan Triase Kanban 3-kolom aktif (`Open`, `In Progress`, `Menunggu`) dan secara otomatis memindahkan tiket yang telah selesai ke modul **Arsip Tiket Selesai** berkecepatan tinggi dengan pencarian instan nomor ID tiket.
+9. **Fleksibilitas Infrastruktur Basis Data Ganda (*Dual-Mode Database Architecture*)**:
+   Menyediakan kapabilitas konfigurasi dan pergantian basis data langsung melalui Web Dashboard khusus peran Administrator. Sistem mendukung peralihan dinamis (*hot-swap*) instan antara **Mode Online (Cloud Aiven MySQL)** dan **Mode Offline (Localhost / XAMPP / MariaDB / Intranet)** guna menjamin kesiapan operasional sistem saat bekerja di lingkungan jaringan lokal maupun migrasi basis data masa depan.
 
 ---
 
@@ -61,7 +63,7 @@ Untuk menjawab kebutuhan tata kelola operasional skala nasional tersebut, dikemb
 | **Kepatuhan Audit & Forensik** | Tidak ada catatan siapa mengubah apa | **Log Audit Forensik**: Seluruh aktivitas login, persetujuan, eskalasi tiket, dan perubahan izin terekam permanen. |
 | **Keamanan Otentikasi** | Hanya username dan password biasa | **MFA / 2FA TOTP**: Verifikasi kode dinamis berbasis waktu + fitur Reset MFA terpusat oleh Admin. |
 | **Kecepatan Triase Kerja** | Papan kerja menumpuk dengan tiket usang | Papan Kanban bersih berfokus pada 3 status aktif, tiket selesai otomatis pindah ke modul Arsip mandiri. |
-| **Keandalan Basis Data** | Berisiko corrupt pada spreadsheet lokal | Basis data cloud **Aiven for MySQL** (SSL Mode: REQUIRED) dengan ACID transaction dan connection pooling. |
+| **Keandalan Basis Data** | Berisiko corrupt pada spreadsheet lokal | **Dual-Mode Engine**: Cloud **Aiven for MySQL** (Online, SSL REQUIRED) dan **MySQL Lokal/XAMPP** (Offline) dengan Dynamic Switcher via Web Admin & One-Click Schema Migration. |
 | **Pengunggahan Bukti Foto** | Sering gagal upload pada koneksi lambat | Auto-kompresi gambar di peramban hingga 85% lebih ringan (~200KB) sebelum dikirimkan ke server. |
 
 ---
@@ -93,7 +95,7 @@ Untuk menjawab kebutuhan tata kelola operasional skala nasional tersebut, dikemb
    - **Laci Matriks Hak Akses Granular (`ManageAccessDrawer`)**: Konfigurasi izin override per user (ALLOW / DENY / INHERIT) terhadap 25+ permission katalog.
    - **Pusat Persetujuan Registrasi (`approvals`)**: Antrean verifikasi permohonan akun staf baru nasional.
    - **Log Audit Keamanan Forensik (`audit_log`)**: Tabel penelusuran aktivitas sistem lengkap dengan pencarian aktor, filter tipe aksi, dan modal detail payload JSON.
-   - **Pemantau Kluster Aiven MySQL (`datasource`)**: Pengujian latensi ping real-time, status SSL REQUIRED, dan kapasitas baris tabel basis data.
+   - **Konfigurasi & Pergantian Basis Data (`datasource`)**: Panel kontrol interaktif pergantian database dinamis (*hot-swap*), preset Cloud Aiven & Localhost/XAMPP, pengujian latensi target, persistensi otomatis file `.env`, dan inisialisasi skema tabel & akun master sekali klik (*One-Click Migration Tool*).
 
 5. **Subsistem Keamanan & Notifikasi Real-time**:
    - Otentikasi Multi-Faktor (MFA / 2FA) berbasis TOTP QR-Code dan kode darurat (*backup recovery codes*).

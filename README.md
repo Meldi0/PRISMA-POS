@@ -1,7 +1,7 @@
 # PRISMA POS — Pos Resolution & Integrated Service Management Application
 
 > **Sistem Helpdesk & Manajemen Tiket Terpadu Kedinasan PT Pos Indonesia (Persero)**  
-> *Versi 2.6.0 — Telegram Bot Gateway, MFA OTP Email, Rekap Produktivitas Operator, Otomasi Regional, & Reopen Tiket Release*
+> *Versi 2.7.0 — Dynamic Database Switcher (Online & Offline), Telegram Bot Gateway, MFA OTP Email, Rekap Produktivitas Operator, Otomasi Regional, & Reopen Tiket Release*
 
 Aplikasi Helpdesk dan Manajemen Tiket Terpadu modern berbasis web yang dirancang khusus untuk lingkungan kerja **PT Pos Indonesia (Persero)**. Menghubungkan Kantor Pos Cabang (KCU/KC/KCP), Kantor Regional, dan Kantor Pusat Pengendalian Operasi dalam satu ekosistem terpadu berdesain elegan **Ocean Cyan Glassmorphism** yang sepenuhnya responsif di semua ukuran perangkat (desktop, tablet, dan smartphone).
 
@@ -10,7 +10,7 @@ Aplikasi Helpdesk dan Manajemen Tiket Terpadu modern berbasis web yang dirancang
 ## Fitur Utama Sistem
 
 ### 1. Tata Kelola Akses & 3 Peran Bisnis Utama
-- **ADMIN (Super Administrator — Global Scope)**: Kendali penuh sistem, persetujuan pendaftar baru, manajemen staf dinas, penyesuaian izin granular, pemantauan audit forensik, dan pemeliharaan kluster database.
+- **ADMIN (Super Administrator — Global Scope)**: Kendali penuh sistem, persetujuan pendaftar baru, manajemen staf dinas, penyesuaian izin granular, pemantauan audit forensik, dan konfigurasi fleksibel basis data (Online & Offline).
 - **PETUGAS_UPT (Petugas Helpdesk UPT Pusat — Global Scope)**: Triase tiket nasional, klaim penugasan, investigasi teknis, komunikasi publik & catatan internal staf (🔒), serta perubahan status dan penutupan tiket.
 - **UPT_LUAR (Staf Kantor Cabang & Regional — Office Scope)**: Pengajuan tiket kendala operasional, pemantauan status tiket, dan komunikasi dua arah.
 
@@ -33,7 +33,7 @@ Aplikasi Helpdesk dan Manajemen Tiket Terpadu modern berbasis web yang dirancang
 ### 6. Keamanan Enterprise & Log Audit Forensik
 - **Multi-Factor Authentication (MFA — OTP Email)**: Setelah verifikasi password berhasil, sistem mengirimkan kode OTP 6 digit ke email terdaftar pengguna. Kode wajib dimasukkan sebelum dapat mengakses sistem.
 - **Reset MFA oleh Admin**: Fitur pemulihan akun cepat bagi staf yang kehilangan akses.
-- **Log Audit Forensik**: Seluruh aktivitas login, persetujuan staf, perubahan hak akses, dan manipulasi tiket tersimpan permanen di tabel `audit_logs`.
+- **Log Audit Forensik**: Seluruh aktivitas login, persetujuan staf, perubahan hak akses, pergantian database, dan manipulasi tiket tersimpan permanen di tabel `audit_logs`.
 
 ### 7. Workstation Triase Cerdas & Modul Arsip
 - **Papan Triase Kanban 3-Kolom**: Fokus triase khusus pada tiket aktif (`Open`, `In Progress`, `Menunggu`).
@@ -63,13 +63,22 @@ Aplikasi Helpdesk dan Manajemen Tiket Terpadu modern berbasis web yang dirancang
 - **Panel Manajemen Admin**: Kartu integrasi di tab Basis Data & Integrasi dengan status koneksi, profil bot `@PriposBot`, masked token, dan tombol *Test Ping*.
 - **URL Sanitizer Cerdas**: Memastikan tautan tombol inline keyboard kompatibel secara otomatis di lingkungan development lokal maupun live deployment.
 
+### 13. Konfigurasi Basis Data Dinamis via Web (Online Cloud & Offline Lokal)
+- **Manajemen Basis Data Terpadu**: Administrator dapat mengonfigurasi dan beralih koneksi database langsung dari Web Dashboard tanpa perlu menyunting file `.env` secara manual atau mematikan proses backend.
+- **Preset 1-Klik**: Tombol preset instan untuk **Mode Online (Cloud Aiven MySQL - SSL ON)** dan **Mode Offline (Localhost:3306 / XAMPP / MariaDB - SSL OFF)**.
+- **Uji Koneksi Target Diagnostik**: Pengujian koneksi sementara (latensi ping, versi MySQL, ketersediaan 14 tabel sistem) sebelum konfigurasi diterapkan.
+- **Hot-Swap Connection Pool & Persistensi .env**: Pool koneksi beralih dinamis secara transparan dan otomatis tersimpan ke file `.env` root serta tercatat di `audit_logs`.
+- **Inisialisasi Skema & Data Master Sekali Klik**: Tombol *One-Click Migration Tool* untuk menginisialisasi seluruh tabel dan akun master saat beralih ke database lokal baru yang masih kosong.
+
 ---
 
 ## Teknologi & Arsitektur (Tech Stack)
 
 - **Frontend**: React 18.3, TypeScript 5.7, Vite 6.1, Tailwind CSS v3.4, Framer Motion v11, Lucide React Icons
 - **Backend API**: Node.js, Express 5.x RESTful API, Vercel Serverless Functions
-- **Basis Data Master**: Cloud Relational Database **Aiven for MySQL 8.0** (SSL Mode: REQUIRED / TLS 1.3)
+- **Basis Data Master**: Dual-Mode Database Engine:
+  - **Online**: Cloud Managed Relational Database **Aiven for MySQL 8.0** (TLS 1.3 / SSL Mode: REQUIRED)
+  - **Offline / On-Premise**: **MySQL 5.7+ / MariaDB 10.3+ / XAMPP** (Localhost / Intranet), didukung Dynamic Proxy Pool Hot-Swap
 - **Keamanan & Kriptografi**: BCrypt.js (Salt rounds: 10), JSON Web Token (JWT), RFC 6238 TOTP Engine
 - **Layanan Email**: Nodemailer (SMTP Transport Client)
 - **Gateway Notifikasi Eksternal**: Telegram Bot API (Native Fetch, Lightweight REST Integration)
@@ -162,7 +171,7 @@ Untuk informasi lebih mendalam, silakan merujuk pada dokumen-dokumen resmi proye
 | [POSO_PRD.md](file:///c:/Users/Asus/Documents/POSIND/POSO/POSO_PRD.md) | Product Requirements Document, spesifikasi 12 tabel database, & katalog API |
 | [DEPLOYMENT.md](file:///c:/Users/Asus/Documents/POSIND/POSO/DEPLOYMENT.md) | Panduan deployment serverless Vercel, Aiven MySQL, & konfigurasi produksi |
 | [PANDUAN_PENGGUNAAN.md](file:///c:/Users/Asus/Documents/POSIND/POSO/PANDUAN_PENGGUNAAN.md) | Panduan operasional workstation helpdesk untuk masing-masing peran pengguna |
-| [CATATAN_PERUBAHAN_FITUR.md](./CATATAN_PERUBAHAN_FITUR.md) | Catatan perubahan fitur v2.5.0: MFA OTP, rekap produktivitas, otomasi regional, reopen tiket |
+| [CATATAN_PERUBAHAN_FITUR.md](./CATATAN_PERUBAHAN_FITUR.md) | Catatan rilis v2.7.0: Dynamic Database Switcher (Online/Offline), Telegram Bot Gateway, MFA OTP, rekap produktivitas, otomasi regional, reopen tiket |
 
 ---
 

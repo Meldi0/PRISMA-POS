@@ -640,10 +640,21 @@ export async function runMigration() {
   }
 }
 
-// Auto-run if executed directly
-runMigration()
-  .then(() => pool.end())
-  .catch((e) => {
-    console.error('Fatal migration error:', e);
-    process.exit(1);
-  });
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+// Auto-run only if executed directly from CLI (e.g. npm run migrate)
+const isDirectRun = process.argv[1] && (
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) ||
+  process.argv[1].endsWith('migrate.js')
+);
+
+if (isDirectRun) {
+  runMigration()
+    .then(() => pool.end())
+    .catch((e) => {
+      console.error('Fatal migration error:', e);
+      process.exit(1);
+    });
+}
+

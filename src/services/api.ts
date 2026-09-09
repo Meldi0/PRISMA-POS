@@ -187,6 +187,9 @@ class PosoApiService {
 
   public async getDbStatus(): Promise<ApiResponse<{
     database_engine: string;
+    mode?: 'online' | 'offline';
+    is_local?: boolean;
+    is_online?: boolean;
     host: string;
     port: number;
     database_name: string;
@@ -198,6 +201,81 @@ class PosoApiService {
     connection_pool: { connection_limit: number; status: string };
   }>> {
     return this.request('/admin/db-status', { method: 'GET' });
+  }
+
+  public async getDbConfig(): Promise<ApiResponse<{
+    current: {
+      host: string;
+      port: number;
+      user: string;
+      database: string;
+      ssl: boolean;
+      mode: 'online' | 'offline';
+      is_local: boolean;
+      is_online: boolean;
+      has_password: boolean;
+      password_masked: string;
+    };
+    presets: Record<string, {
+      id: string;
+      label: string;
+      host: string;
+      port: number;
+      user: string;
+      database: string;
+      ssl: boolean;
+      note: string;
+    }>;
+  }>> {
+    return this.request('/admin/db-config', { method: 'GET' });
+  }
+
+  public async testDbConfig(payload: {
+    host: string;
+    port?: number;
+    user?: string;
+    password?: string;
+    database?: string;
+    ssl?: boolean;
+    createDbIfNotExists?: boolean;
+  }): Promise<ApiResponse<{
+    connected: boolean;
+    latency_ms: number;
+    database: string;
+    mysql_version: string;
+    host: string;
+    port: number;
+    total_tables: number;
+    has_required_tables: boolean;
+    missing_tables: string[];
+    table_names: string[];
+  }>> {
+    return this.request('/admin/db-config/test', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  public async saveDbConfig(payload: {
+    host: string;
+    port?: number;
+    user?: string;
+    password?: string;
+    database?: string;
+    ssl?: boolean;
+    createDbIfNotExists?: boolean;
+  }): Promise<ApiResponse<any>> {
+    return this.request('/admin/db-config/save', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  public async migrateDbSchema(): Promise<ApiResponse<any>> {
+    return this.request('/admin/db-config/migrate', {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
   }
 
   // -----------------------------------------------------------------------------------------------

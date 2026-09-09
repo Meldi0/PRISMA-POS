@@ -189,37 +189,49 @@ export async function getDbStatus(req, res) {
 
     try {
       const [verRows] = await connection.query('SELECT VERSION() AS ver, DATABASE() AS current_db');
-      version = verRows[0].ver;
-      dbName = verRows[0].current_db;
+      version = verRows[0]?.ver || 'MySQL';
+      dbName = verRows[0]?.current_db || process.env.DB_NAME || 'defaultdb';
 
-      const [uRows] = await connection.query('SELECT COUNT(*) AS c FROM users');
-      const [tRows] = await connection.query('SELECT COUNT(*) AS c FROM tickets');
-      const [thRows] = await connection.query('SELECT COUNT(*) AS c FROM threads');
-      const [aRows] = await connection.query('SELECT COUNT(*) AS c FROM audit_logs');
-      const [apvRows] = await connection.query("SELECT COUNT(*) AS c FROM registration_approvals WHERE status = 'PENDING'");
+      // Safe table counting to prevent failure on fresh unmigrated databases
+      const safeCount = async (tableName, where = '') => {
+        try {
+          const [r] = await connection.query(`SELECT COUNT(*) AS c FROM \`${tableName}\` ${where}`);
+          return Number(r[0]?.c || 0);
+        } catch (e) {
+          return 0;
+        }
+      };
 
       tableCounts = {
-        users: uRows[0].c,
-        tickets: tRows[0].c,
-        threads: thRows[0].c,
-        audit_logs: aRows[0].c,
-        pending_approvals: apvRows[0].c
+        users: await safeCount('users'),
+        tickets: await safeCount('tickets'),
+        threads: await safeCount('threads'),
+        audit_logs: await safeCount('audit_logs'),
+        pending_approvals: await safeCount('registration_approvals', "WHERE status = 'PENDING'")
       };
     } finally {
       connection.release();
     }
 
+    const host = process.env.DB_HOST || 'localhost';
+    const isAiven = host.includes('aivencloud.com');
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
+    const isSsl = process.env.DB_SSL === 'true' || process.env.DB_SSL === 'REQUIRED' || isAiven;
+    const engineName = isAiven ? 'Aiven for MySQL (Cloud)' : (isLocal ? 'MySQL Localhost (Offline)' : 'MySQL Server');
     const latency = Date.now() - start;
 
     return res.status(200).json({
       status: 'success',
       data: {
-        database_engine: 'Aiven for MySQL',
-        host: process.env.DB_HOST,
-        port: process.env.DB_PORT || 21970,
+        database_engine: engineName,
+        mode: isLocal ? 'offline' : 'online',
+        is_local: isLocal,
+        is_online: !isLocal,
+        host: host,
+        port: Number(process.env.DB_PORT || (isAiven ? 21970 : 3306)),
         database_name: dbName,
-        ssl_mode: 'REQUIRED',
-        ssl_active: true,
+        ssl_mode: isSsl ? 'REQUIRED' : 'DISABLED',
+        ssl_active: isSsl,
         latency_ms: latency,
         mysql_version: version,
         table_counts: tableCounts,
@@ -230,11 +242,22 @@ export async function getDbStatus(req, res) {
       }
     });
   } catch (err) {
+    const host = process.env.DB_HOST || 'localhost';
+    const isAiven = host.includes('aivencloud.com');
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
+
     return res.status(500).json({
       status: 'error',
       code: 500,
       message: `Database error: ${err.message}`,
-      latency_ms: Date.now() - start
+      latency_ms: Date.now() - start,
+      data: {
+        database_engine: isAiven ? 'Aiven for MySQL (Cloud)' : 'MySQL Localhost (Offline)',
+        mode: isLocal ? 'offline' : 'online',
+        host: host,
+        port: process.env.DB_PORT || (isAiven ? 21970 : 3306),
+        database_name: process.env.DB_NAME || 'defaultdb'
+      }
     });
   }
 }
