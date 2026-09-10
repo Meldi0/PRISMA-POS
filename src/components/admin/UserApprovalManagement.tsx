@@ -59,6 +59,7 @@ export const UserApprovalManagement: React.FC<UserApprovalManagementProps> = ({ 
         if (onApprovedCountChange) {
           onApprovedCountChange(pendingCount);
         }
+        window.dispatchEvent(new CustomEvent('approvals-updated'));
       }
     } catch (err: any) {
       toastError('Gagal memuat daftar persetujuan registrasi.');

@@ -9,6 +9,10 @@
 .nav-item { display:flex; gap:12px; align-items:center; padding:12px; width:100%; text-align:left; font-size:13px; border-radius:9px; margin-bottom:5px; transition:background .15s; }
 .nav-item:hover { background:#ffffff0b; color:white; }
 .nav-item.active { background:#225366; color:white; box-shadow:inset 3px 0 #6dd8c0; }
+.nav-badge { margin-left:auto; background:#f59e0b; color:#102f3c; font-weight:800; font-size:10px; padding:2px 7px; border-radius:10px; line-height:1.3; box-shadow:0 1px 2px #0002; }
+.notification-bell { position:relative; width:38px; height:38px; border:1px solid #dde6ea; border-radius:8px; display:grid; place-items:center; background:white; color:#365968; transition:all .15s; }
+.notification-bell:hover { background:#f1f6f7; color:#11677a; }
+.notification-dot { position:absolute; top:-5px; right:-5px; min-width:18px; height:18px; border-radius:9px; background:#e11d48; color:white; font-size:10px; font-weight:800; display:grid; place-items:center; padding:0 4px; box-shadow:0 2px 4px #e11d4844; border:2px solid white; }
 .sidebar-help { margin-top:auto; padding:24px 12px 20px; display:flex; flex-direction:column; gap:9px; }
 .sidebar-help>svg { color:#80cdbc; }
 .sidebar-help strong { font-size:12px; font-weight:650; line-height:1.6; }
