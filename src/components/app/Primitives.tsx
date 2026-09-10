@@ -11,8 +11,8 @@ export function ErrorNotice({ message, retry }: { message?: string; retry?: () =
   return message ? <div className="error-notice" role="alert"><AlertCircle size={18} className="shrink-0" /><div>{message}{retry && <button className="underline ml-2 font-semibold" onClick={retry}>Coba lagi</button>}</div></div> : null;
 }
 export function Loading({ label = 'Memuat data…' }: { label?: string }) { return <div className="loading-state" role="status"><LoaderCircle className="animate-spin" size={22} /><span>{label}</span></div>; }
-export function Field({ label, hint, children, required = false }: { label: string; hint?: string; children: React.ReactNode; required?: boolean }) {
-  return <label className="field"><span className="field-label">{label}{required && <span className="text-rose-600 ml-1" aria-label="wajib diisi">*</span>}</span>{children}{hint && <span className="field-hint">{hint}</span>}</label>;
+export function Field({ label, hint, children, required = false, htmlFor }: { label: string; hint?: string; children: React.ReactNode; required?: boolean; htmlFor?: string }) {
+  return <div className="field"><label htmlFor={htmlFor} className="field-label">{label}{required && <span className="text-rose-600 ml-1" aria-label="wajib diisi">*</span>}</label>{children}{hint && <span className="field-hint">{hint}</span>}</div>;
 }
 export function formatDate(value?: string) { if (!value) return '—'; const date = new Date(value); return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(date); }
 export function shortId(value: string) { return value.startsWith('TICK-') && value.length > 25 ? `TICK-${value.slice(5, 13).toUpperCase()}` : value; }

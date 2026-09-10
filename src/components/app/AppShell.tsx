@@ -24,7 +24,7 @@ export function LiveClock() {
   );
 }
 
-export function Brand() { return <Link to="/" className="app-brand"><span className="brand-mark"><img src="/prisma-pos-logo.png" alt="" /></span><span><strong>PRISMA POS</strong><small>Pusat layanan operasional</small></span></Link>; }
+export function Brand() { return <Link to="/" className="app-brand" aria-label="PRISMA POS - Beranda"><span className="brand-mark"><img src="/prisma-pos-logo.png" alt="Logo PRISMA POS" width="38" height="42" /></span><span><strong>PRISMA POS</strong><small>Pusat layanan operasional</small></span></Link>; }
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, isStaff, hasPermission, logout } = useAuth();
   const [open, setOpen] = useState(false);
