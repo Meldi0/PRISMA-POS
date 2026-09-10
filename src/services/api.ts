@@ -20,7 +20,20 @@ const STORAGE_KEYS = {
   AUTH_USER: 'poso_auth_user'
 };
 
-const API_BASE = '/api';
+export const getApiBase = (): string => {
+  const envUrl = (import.meta as any).env?.VITE_API_URL;
+  if (envUrl) return envUrl;
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    // When accessed from InfinityFree or custom static domains, proxy requests to live Vercel backend
+    if (host.includes('page.gd') || host.includes('infinityfree') || host.includes('epizy.com')) {
+      return 'https://poso-jet.vercel.app/api';
+    }
+  }
+  return '/api';
+};
+
+const API_BASE = getApiBase();
 
 class PosoApiService {
   // In-flight mutex to avoid duplicate thread messages

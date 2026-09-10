@@ -18,9 +18,35 @@ if (process.env.TRUST_PROXY_HOPS) app.set('trust proxy', Number(process.env.TRUS
 const PORT = process.env.PORT || 5001;
 
 // Middleware
-const allowedOrigins = (process.env.APP_ORIGINS || process.env.APP_BASE_URL || 'http://localhost:3000,http://localhost:3001,http://localhost:4173').split(',').map(value => value.trim());
+const defaultAllowed = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:4173',
+  'https://poso-jet.vercel.app',
+  'http://prisma-pos.page.gd',
+  'https://prisma-pos.page.gd'
+];
+const envAllowed = (process.env.APP_ORIGINS || process.env.APP_BASE_URL || '').split(',').map(value => value.trim()).filter(Boolean);
+const allowedOrigins = [...defaultAllowed, ...envAllowed];
+
 app.use(securityHeaders);
-app.use(cors({ origin: (origin, callback) => callback(null, !origin || allowedOrigins.includes(origin)), credentials: false }));
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (
+      allowedOrigins.includes(origin) ||
+      origin.endsWith('.page.gd') ||
+      origin.endsWith('.vercel.app') ||
+      origin.includes('infinityfree')
+    ) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With']
+}));
 
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: false, limit: '32kb' }));
