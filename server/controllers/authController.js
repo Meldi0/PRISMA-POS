@@ -73,6 +73,38 @@ export const login = endpoint(async (req, res) => {
     }
   }
 
+  // System Administrator (.local) direct sign-in when TOTP is not enabled
+  if (user.email.endsWith('.local') && !user.totp_secret) {
+    const sessionId = id('SES');
+    const hours = req.body.remember_me === true ? 168 : 8;
+    const authToken = generateToken({ user_id: user.user_id, sid: sessionId }, hours + 'h');
+    await pool.query(
+      `INSERT INTO login_sessions (session_id, user_id, token_hash, ip_address, user_agent, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [sessionId, user.user_id, digest(authToken), req.ip?.slice(0,45) || null, (req.headers['user-agent'] || '').slice(0,1000), new Date(Date.now() + hours * 3600000)]
+    );
+    let deviceToken = null;
+    if (req.body.remember_me === true) {
+      deviceToken = crypto.randomBytes(32).toString('hex');
+      await pool.query(
+        `INSERT INTO trusted_devices (device_id, user_id, device_token_hash, device_name, ip_address, user_agent, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))`,
+        [id('DEV'), user.user_id, digest(deviceToken), (req.headers['user-agent'] || 'Browser').slice(0, 250), req.ip?.slice(0, 45) || null, (req.headers['user-agent'] || '').slice(0, 1000)]
+      );
+    }
+    await pool.query('UPDATE users SET failed_attempts = 0, locked_until = NULL, last_login_at = NOW() WHERE user_id = ?', [user.user_id]);
+    await audit(pool, user, 'LOGIN_SUCCESS', user.user_id, 'Masuk langsung (akun sistem administrator)');
+    return res.json({
+      status: 'success',
+      mfa_required: false,
+      data: {
+        token: authToken,
+        device_token: deviceToken,
+        user: await profile(pool, user.user_id)
+      }
+    });
+  }
+
   const token = crypto.randomBytes(32).toString('hex');
   const code = otp();
   if (!user.totp_secret) await deliver(user, code);
