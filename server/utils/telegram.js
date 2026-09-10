@@ -194,8 +194,8 @@ export async function sendTicketCreatedAlert(ticket, meta = {}) {
   const regionDisplay = meta.region_name || ticket.region_id || '-';
   const category = escapeHtml(ticket.category || ticket.department || 'Layanan Pos');
   const subject = escapeHtml(ticket.subject || 'Laporan Masalah');
-  const reporter = escapeHtml(ticket.requester_name || 'Staf Dinas');
-  const reporterDetail = ticket.requester_nip ? `NIP: ${escapeHtml(ticket.requester_nip)}` : escapeHtml(ticket.requester_email || '');
+  const reporter = escapeHtml(ticket.requester_name || 'Mitra Agen Pos');
+  const reporterDetail = ticket.requester_phone ? `WA: ${escapeHtml(ticket.requester_phone)}` : (ticket.requester_nip ? `Nopen: ${escapeHtml(ticket.requester_nip)}` : escapeHtml(ticket.requester_email || ''));
   
   let desc = ticket.description ? ticket.description.trim() : '';
   if (desc.length > 250) {

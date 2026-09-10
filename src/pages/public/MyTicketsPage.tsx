@@ -124,10 +124,10 @@ export const MyTicketsPage: React.FC = () => {
             </Link>
             <div>
               <h1 className="text-[16px] font-bold text-[#0F172A] leading-tight flex items-center gap-2">
-                <span>Portal Pelapor UPT</span>
+                <span>Portal Mitra Agen Pos</span>
                 <span className="text-[10px] font-extrabold text-[#0D5C75] bg-[#EAF4F8] px-2 py-0.5 rounded-full">PRISMA POS</span>
               </h1>
-              <p className="text-[11px] text-[#64748B]">{user?.name || user?.email || 'Pelapor Dinas'}</p>
+              <p className="text-[11px] text-[#64748B]">{user?.name || user?.email || 'Mitra Agen Pos'}</p>
             </div>
           </div>
 
@@ -163,28 +163,28 @@ export const MyTicketsPage: React.FC = () => {
       {/* Main Container */}
       <main className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 flex-1 w-full space-y-6">
         
-        {/* Banner Identitas Staf UPT & Penjelasan Alur Helpdesk */}
+        {/* Banner Identitas Mitra Agen & Penjelasan Alur Helpdesk */}
         <div className="bg-gradient-to-r from-[#083342] via-[#0D5C75] to-[#199FB1] rounded-[22px] p-6 text-white shadow-md relative overflow-hidden">
           <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-white/5 rounded-full pointer-events-none blur-xl" />
           <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
             <div className="space-y-1.5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-bold tracking-wider uppercase">
-                  Identitas Pelapor UPT
+                  Identitas Mitra Agen Pos
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/30 border border-emerald-400/40 text-emerald-200 text-[10px] font-bold">
-                  Akun Dinas Aktif
+                  Akun Agen Aktif
                 </span>
               </div>
               <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white">
-                {user?.name || 'Staf UPT'}
+                {user?.name || 'Mitra Agen'}
               </h2>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#BAE6FD]">
-                <span>Jabatan: <strong className="text-white">{user?.position || 'Staf Operasional'}</strong></span>
+                <span>Peran: <strong className="text-white">{user?.position || 'Pengelola Agen'}</strong></span>
                 <span>•</span>
-                <span>NOPEN / NIP: <strong className="text-white font-mono">{user?.nip || user?.nopen_kc || '-'}</strong></span>
+                <span>No. Agen / Nopen: <strong className="text-white font-mono">{user?.nopen || user?.nip || user?.nopen_kc || '-'}</strong></span>
                 <span>•</span>
-                <span>Asal UPT: <strong className="text-white">{user?.office_name || user?.office_id || 'KCU Bandung'}</strong></span>
+                <span>Kantor Pembina: <strong className="text-white">{user?.office_name || user?.office_id || 'KCU Bandung'}</strong></span>
                 <span>•</span>
                 <span>Regional: <strong className="text-white">{user?.region_name || user?.region_code || 'Regional 3'}</strong></span>
               </div>

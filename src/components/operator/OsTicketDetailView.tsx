@@ -25,7 +25,8 @@ import {
   RefreshCw,
   Edit3,
   Check,
-  AlertCircle
+  AlertCircle,
+  Phone
 } from 'lucide-react';
 
 interface OsTicketDetailViewProps {
@@ -380,23 +381,23 @@ export const OsTicketDetailView: React.FC<OsTicketDetailViewProps> = ({
           <div className="p-6 space-y-3.5">
             <h3 className="font-bold text-slate-300 text-xs uppercase tracking-wider text-[11px] pb-2 border-b border-slate-800 flex items-center gap-1.5">
               <User className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Informasi Pelapor & Penugasan UPT</span>
+              <span>Informasi Mitra Agen & Penugasan</span>
             </h3>
 
             <div className="grid grid-cols-3 gap-2 items-center py-0.5">
-              <span className="text-slate-400 font-medium">Pelapor & NOPEN:</span>
+              <span className="text-slate-400 font-medium">Pelapor & No. Agen:</span>
               <span className="col-span-2 text-slate-100 font-bold text-sm">
-                {ticket.requester_name || 'Pelapor Dinas'}
+                {ticket.requester_name || 'Mitra Agen Pos'}
                 {ticket.requester_nip && (
                   <span className="ml-2 font-mono text-xs px-1.5 py-0.5 rounded bg-slate-800 text-indigo-300 border border-slate-700">
-                    NOPEN: {ticket.requester_nip}
+                    No. Agen: {ticket.requester_nip}
                   </span>
                 )}
               </span>
             </div>
 
             <div className="grid grid-cols-3 gap-2 items-center py-0.5">
-              <span className="text-slate-400 font-medium">Asal Kantor UPT:</span>
+              <span className="text-slate-400 font-medium">Kantor Pos Pembina:</span>
               <span className="col-span-2 text-cyan-300 font-bold">
                 {ticket.office_name || ticket.office_id || 'KCU Bandung'} ({ticket.region_name || ticket.region_code || 'Regional 3'})
               </span>
@@ -406,6 +407,18 @@ export const OsTicketDetailView: React.FC<OsTicketDetailViewProps> = ({
               <span className="text-slate-400 font-medium">Email Pelapor:</span>
               <span className="col-span-2 font-mono text-indigo-300 font-bold text-xs truncate">{ticket.requester_email}</span>
             </div>
+
+            {ticket.requester_phone && (
+              <div className="grid grid-cols-3 gap-2 items-center py-0.5">
+                <span className="text-slate-400 font-medium">WhatsApp / HP:</span>
+                <span className="col-span-2 font-mono text-emerald-400 font-bold text-xs flex items-center gap-1.5">
+                  <Phone size={12} className="text-emerald-400 shrink-0" />
+                  <a href={`https://wa.me/${ticket.requester_phone.replace(/[^0-9]/g, '')}`} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                    {ticket.requester_phone}
+                  </a>
+                </span>
+              </div>
+            )}
 
             <div className="grid grid-cols-3 gap-2 items-center py-0.5">
               <span className="text-slate-400 font-medium">Saluran Masuk:</span>

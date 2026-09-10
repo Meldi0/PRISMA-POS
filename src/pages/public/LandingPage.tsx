@@ -249,7 +249,7 @@ export const LandingPage: React.FC = () => {
             </h1>
 
             <p className="text-[15px] sm:text-[16px] text-white/80 leading-relaxed mb-8 max-w-xl">
-              Sistem penanganan gangguan dinas terpadu PRISMA POS — dari pengendalian operasi, sarana gedung CGS, investigasi security, hingga kendala sistem informasi.
+              Sistem penanganan kendala operasional Agen Pos terpadu PRISMA POS — dari layanan pengiriman & transaksi, sarana operasional, hingga kendala sistem informasi.
             </p>
 
             {/* CTA Buttons */}

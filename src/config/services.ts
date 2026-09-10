@@ -71,7 +71,7 @@ export const CASCADING_DEPARTMENTS: DepartmentConfig[] = [
       { id: 'jaringan_vpn_internet', label: 'Jaringan Wi-Fi, LAN, & VPN' },
       { id: 'error_aplikasi_poso', label: 'Aplikasi PRISMA POS & Core System' },
       { id: 'kendala_hardware', label: 'Hardware, Komputer, & Printer Barcode' },
-      { id: 'reset_password_akses', label: 'Akun Email Dinas & Akses SSO' },
+      { id: 'reset_password_akses', label: 'Akun Aplikasi Agen & Akses Portal' },
     ],
     tip: 'Sertakan screenshot pesan error yang muncul, URL/layanan yang terdampak, atau nomor aset stiker perangkat.'
   }

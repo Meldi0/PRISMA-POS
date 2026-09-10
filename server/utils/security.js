@@ -55,7 +55,7 @@ export function integer(value, fallback, max = 100) {
 }
 
 export function safeUser(user) {
-  const allowed = ['user_id', 'name', 'email', 'role', 'is_active', 'account_status', 'data_scope', 'region_id', 'office_id', 'position', 'nip', 'department', 'role_title', 'mfa_enabled', 'failed_attempts', 'locked_until', 'last_login_at', 'created_by', 'created_at', 'updated_at', 'region_name', 'region_code', 'office_name', 'office_code', 'nopen_kc'];
+  const allowed = ['user_id', 'name', 'email', 'phone', 'phone_number', 'nopen', 'role', 'is_active', 'account_status', 'data_scope', 'region_id', 'office_id', 'position', 'nip', 'department', 'role_title', 'mfa_enabled', 'failed_attempts', 'locked_until', 'last_login_at', 'created_by', 'created_at', 'updated_at', 'region_name', 'region_code', 'office_name', 'office_code', 'nopen_kc'];
   return Object.fromEntries(allowed.filter(key => key in user).map(key => [key, user[key]]));
 }
 

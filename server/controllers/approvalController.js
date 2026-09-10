@@ -20,8 +20,8 @@ export async function getApprovals(req, res) {
 
     if (search && search.trim()) {
       const q = `%${search.trim().toLowerCase()}%`;
-      conditions.push('(LOWER(u.name) LIKE ? OR LOWER(u.email) LIKE ? OR LOWER(u.nip) LIKE ? OR LOWER(o.name) LIKE ?)');
-      params.push(q, q, q, q);
+      conditions.push('(LOWER(u.name) LIKE ? OR LOWER(u.email) LIKE ? OR LOWER(COALESCE(u.nopen, u.nip, "")) LIKE ? OR LOWER(COALESCE(u.phone, "")) LIKE ? OR LOWER(o.name) LIKE ?)');
+      params.push(q, q, q, q, q);
     }
 
     const whereClause = conditions.join(' AND ');
@@ -30,7 +30,8 @@ export async function getApprovals(req, res) {
       `SELECT 
         ra.approval_id, ra.status AS approval_status, ra.rejection_reason,
         ra.reviewed_at, ra.reviewer_name, ra.created_at AS requested_at,
-        u.user_id, u.name, u.email, u.position, u.nip,
+        u.user_id, u.name, u.email, u.phone, u.phone AS phone_number, u.position, u.nip,
+        COALESCE(u.nopen, u.nip) AS nopen,
         u.role, u.account_status, u.data_scope, u.region_id, u.office_id,
         r.name AS region_name, r.code AS region_code,
         COALESCE(o.name, u.office_id) AS office_name, o.code AS office_code, o.code AS nopen_kc

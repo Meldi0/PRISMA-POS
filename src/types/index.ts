@@ -66,7 +66,10 @@ export interface RegistrationApproval {
   requested_at: string;
   name: string;
   email: string;
+  phone?: string;
   phone_number?: string;
+  nopen?: string;
+  nip?: string;
   position?: string;
   nopen_kc?: string;
   role: UserRole;
@@ -100,11 +103,13 @@ export interface User {
   created_by?: string;
   created_at: string;
 
-  // Profil Dinas Lengkap Pos Indonesia
+  // Profil Akun Mitra Agen Pos Indonesia
+  nopen?: string;
   nip?: string;
+  phone?: string;
+  phone_number?: string;
   department?: string;
   role_title?: string;
-  phone_number?: string;
   nopen_kc?: string;
 
   // Granular Permissions array for current session

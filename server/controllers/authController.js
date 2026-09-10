@@ -8,7 +8,7 @@ import { normalizeRole, isActive } from '../utils/access.js';
 import { HttpError, id, digest, otp, safeEqual, text, email, password, transaction, audit, endpoint, safeUser } from '../utils/security.js';
 import { validateOrganization } from './userController.js';
 
-const profileSql = `SELECT u.*, r.name AS region_name, r.code AS region_code, COALESCE(o.name, u.office_id) AS office_name, o.code AS office_code, o.code AS nopen_kc
+const profileSql = `SELECT u.*, r.name AS region_name, r.code AS region_code, COALESCE(o.name, u.office_id) AS office_name, o.code AS office_code, o.code AS nopen_kc, COALESCE(u.nopen, u.nip) AS nopen, u.phone, u.phone AS phone_number
   FROM users u LEFT JOIN regions r ON u.region_id = r.region_id LEFT JOIN offices o ON u.office_id = o.office_id WHERE u.user_id = ? LIMIT 1`;
 const maskEmail = (value) => value.replace(/^(.)(.*)(@.*)$/, '$1***$3');
 const codeHash = (token, code) => crypto.createHmac('sha256', process.env.JWT_SECRET).update(token + ':' + code).digest('hex');
@@ -198,17 +198,18 @@ export const register = endpoint(async (req, res) => {
   const name = text(req.body.name, 'Nama lengkap', { min: 2, max: 150 });
   const address = email(req.body.email);
   const hashed = await hashPassword(password(req.body.password));
-  const officeInput = text(req.body.office_id || req.body.office_name, 'Kantor', { min: 2, max: 150 });
+  const officeInput = text(req.body.office_id || req.body.office_name, 'Kantor Pos Pembina', { min: 2, max: 150 });
   const regionId = text(req.body.region_id, 'Regional', { max: 50 });
-  const position = text(req.body.position, 'Jabatan', { max: 100, optional: true });
-  const nip = text(req.body.nip, 'NIP', { max: 50, optional: true });
+  const phone = text(req.body.phone || req.body.phone_number, 'Nomor HP / WhatsApp', { min: 8, max: 30, optional: true });
+  const nopen = text(req.body.nopen || req.body.nip, 'ID User / Nopen', { max: 50, optional: true });
+  const position = text(req.body.position, 'Peran di Agen', { max: 100, optional: true });
   const userId = id('USR');
   await transaction(pool, async db => {
     const finalOfficeId = await validateOrganization(db, regionId, officeInput);
-    await db.query(`INSERT INTO users (user_id, name, email, password_hash, role, is_active, account_status, region_id, office_id, data_scope, position, nip, created_by)
-      VALUES (?, ?, ?, ?, 'UPT_LUAR', 0, 'PENDING', ?, ?, 'OFFICE', ?, ?, 'self_registration')`, [userId, name, address, hashed, regionId, finalOfficeId, position, nip]);
+    await db.query(`INSERT INTO users (user_id, name, email, phone, password_hash, role, is_active, account_status, region_id, office_id, data_scope, position, nip, nopen, created_by)
+      VALUES (?, ?, ?, ?, ?, 'UPT_LUAR', 0, 'PENDING', ?, ?, 'OFFICE', ?, ?, ?, 'self_registration')`, [userId, name, address, phone || null, hashed, regionId, finalOfficeId, position, nopen || null, nopen || null]);
     await db.query("INSERT INTO registration_approvals (approval_id, user_id, status) VALUES (?, ?, 'PENDING')", [id('APV'), userId]);
-    await audit(db, { user_id: userId, name, role: 'UPT_LUAR' }, 'REGISTER', userId, 'Pendaftaran akun menunggu persetujuan');
+    await audit(db, { user_id: userId, name, role: 'UPT_LUAR' }, 'REGISTER', userId, 'Pendaftaran akun mitra agen pos menunggu persetujuan');
   });
   res.status(201).json({ status: 'success', account_status: 'PENDING', message: 'Pendaftaran berhasil. Tunggu verifikasi administrator sebelum masuk.', data: { user_id: userId, account_status: 'PENDING' } });
 });

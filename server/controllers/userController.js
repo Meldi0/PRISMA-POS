@@ -54,12 +54,14 @@ export const createUser = endpoint(async (req, res) => {
   const scope = choice(body.data_scope || (role === 'UPT_LUAR' ? 'OFFICE' : 'GLOBAL'), ['OWN','OFFICE','REGIONAL','GLOBAL'], 'Cakupan');
   const status = choice(body.account_status || 'ACTIVE', ['ACTIVE','INACTIVE'], 'Status akun');
   const userId = id('USR');
+  const phone = text(body.phone || body.phone_number, 'Nomor HP', { max: 30, optional: true });
+  const nopen = text(body.nopen || body.nip, 'ID User / Nopen', { max: 50, optional: true });
   await transaction(pool, async db => {
     const resolvedOfficeId = await validateOrganization(db, body.region_id, body.office_id);
-    await db.query(`INSERT INTO users (user_id, name, email, password_hash, role, data_scope, account_status, is_active, region_id, office_id, position, nip, department, role_title, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [userId, name, address, hashed, role, scope, status, status === 'ACTIVE' ? 1 : 0, body.region_id, resolvedOfficeId,
-      text(body.position, 'Jabatan', { max: 100, optional: true }), text(body.nip, 'NIP', { max: 50, optional: true }), text(body.department, 'Departemen', { max: 150, optional: true }), text(body.role_title, 'Nama jabatan', { max: 150, optional: true }), req.user.email]);
+    await db.query(`INSERT INTO users (user_id, name, email, phone, password_hash, role, data_scope, account_status, is_active, region_id, office_id, position, nip, nopen, department, role_title, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [userId, name, address, phone || null, hashed, role, scope, status, status === 'ACTIVE' ? 1 : 0, body.region_id, resolvedOfficeId,
+      text(body.position, 'Jabatan / Peran', { max: 100, optional: true }), nopen || null, nopen || null, text(body.department, 'Departemen', { max: 150, optional: true }), text(body.role_title, 'Nama jabatan', { max: 150, optional: true }), req.user.email]);
     await audit(db, req.user, 'CREATE_USER', userId, 'Pengguna dibuat dengan role ' + role);
   });
   const [[user]] = await pool.query('SELECT * FROM users WHERE user_id = ?', [userId]);
@@ -83,9 +85,11 @@ export const updateUserRole = endpoint(async (req, res) => {
     const resolvedOfficeId = office ? await validateOrganization(db, region, office) : user.office_id;
     const updates = { role, account_status: status, is_active: status === 'ACTIVE' ? 1 : 0, region_id: region, office_id: resolvedOfficeId };
     if (body.data_scope) updates.data_scope = choice(body.data_scope, ['GLOBAL','REGIONAL','OFFICE','OWN'], 'Cakupan');
-    for (const [key,max] of [['name',150],['position',100],['nip',50],['department',150],['role_title',150]]) {
+    for (const [key,max] of [['name',150],['position',100],['nip',50],['nopen',50],['phone',30],['department',150],['role_title',150]]) {
       if (body[key] !== undefined) updates[key] = text(body[key], key, { max, optional: key !== 'name' });
     }
+    if (updates.nopen && !updates.nip) updates.nip = updates.nopen;
+    if (updates.nip && !updates.nopen) updates.nopen = updates.nip;
     if (body.reset_password) updates.password_hash = await hashPassword(password(body.reset_password));
     await db.query('UPDATE users SET ' + Object.keys(updates).map(key => key + ' = ?').join(', ') + ', updated_at = NOW() WHERE user_id = ?', [...Object.values(updates), targetId]);
     if (body.reset_password || role !== normalizeRole(user.role) || status !== user.account_status || body.data_scope || region !== user.region_id || office !== user.office_id) await revoke(db, targetId);

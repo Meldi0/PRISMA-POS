@@ -58,7 +58,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [isAdmin]);
 
   const menu = [
-    { to: home, icon: isStaff ? LayoutDashboard : Inbox, label: isStaff ? 'Antrean tiket' : 'Tiket unit kerja', view: 'tickets', show: true },
+    { to: home, icon: isStaff ? LayoutDashboard : Inbox, label: isStaff ? 'Antrean tiket' : 'Tiket saya & agen', view: 'tickets', show: true },
     { to: '/track', icon: Search, label: 'Cari tiket', view: 'track', show: true },
     { to: '/account', icon: ShieldCheck, label: 'Akun & keamanan', view: 'account', show: true },
   ];
@@ -81,7 +81,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <button onClick={logout} className="nav-item sidebar-logout"><LogOut size={18} />Keluar dari akun</button>
     </aside>
     <div className="app-body">
-      <header className="app-topbar"><div className="flex items-center gap-3"><button className="mobile-menu icon-button" aria-label="Buka menu navigasi" onClick={() => setOpen(true)}><Menu size={21} /></button><span className="topbar-label">Helpdesk terpadu <span>/</span> <strong>{isStaff ? 'Ruang petugas' : 'Portal pelapor'}</strong></span></div><div className="flex items-center gap-3 sm:gap-4"><LiveClock />{isAdmin && <Link to="/dashboard?view=approvals" className="notification-bell" title={pendingApprovals > 0 ? `${pendingApprovals} permohonan persetujuan akun dinas` : 'Persetujuan akun dinas'} aria-label={`Notifikasi persetujuan akun: ${pendingApprovals} permohonan`}><Bell size={19} />{pendingApprovals > 0 && <span className="notification-dot">{pendingApprovals}</span>}</Link>}<Link className="btn btn-primary topbar-create" to="/buat-tiket"><Plus size={16} />Buat tiket</Link><Link to="/account" className="account-chip" aria-label={`Profil ${user?.name}`}><span>{user?.name?.slice(0,1).toUpperCase()}</span><div><strong>{user?.name}</strong><small>{isAdmin ? 'Administrator' : isStaff ? 'Petugas helpdesk' : 'Pelapor'}</small></div></Link></div></header>
+      <header className="app-topbar"><div className="flex items-center gap-3"><button className="mobile-menu icon-button" aria-label="Buka menu navigasi" onClick={() => setOpen(true)}><Menu size={21} /></button><span className="topbar-label">Helpdesk terpadu <span>/</span> <strong>{isStaff ? 'Ruang petugas' : 'Portal Agen Pos'}</strong></span></div><div className="flex items-center gap-3 sm:gap-4"><LiveClock />{isAdmin && <Link to="/dashboard?view=approvals" className="notification-bell" title={pendingApprovals > 0 ? `${pendingApprovals} permohonan persetujuan akun agen` : 'Persetujuan akun agen'} aria-label={`Notifikasi persetujuan akun: ${pendingApprovals} permohonan`}><Bell size={19} />{pendingApprovals > 0 && <span className="notification-dot">{pendingApprovals}</span>}</Link>}<Link className="btn btn-primary topbar-create" to="/buat-tiket"><Plus size={16} />Buat tiket</Link><Link to="/account" className="account-chip" aria-label={`Profil ${user?.name}`}><span>{user?.name?.slice(0,1).toUpperCase()}</span><div><strong>{user?.name}</strong><small>{isAdmin ? 'Administrator' : isStaff ? 'Petugas helpdesk' : 'Mitra Agen'}</small></div></Link></div></header>
       <main id="main-content" tabIndex={-1} className="app-content">{children}</main>
       <footer className="app-footer"><span>PRISMA POS · PT Pos Indonesia</span><span>Setiap laporan, ditangani dengan jelas.</span></footer>
     </div>

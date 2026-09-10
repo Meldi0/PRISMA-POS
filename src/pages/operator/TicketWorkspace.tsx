@@ -56,7 +56,7 @@ export function TicketWorkspace() {
   };
   const adminViews:Record<string,{title:string;description:string;allowed:boolean;component:React.ReactNode}>={
     users:{title:'Pengguna & hak akses',description:'Kelola identitas, penempatan kantor, dan kewenangan pengguna.',allowed:admin,component:<Users/>},
-    approvals:{title:'Persetujuan akun dinas',description:'Periksa identitas dan kantor sebelum memberikan akses layanan.',allowed:admin,component:<Approvals/>},
+    approvals:{title:'Persetujuan akun agen',description:'Periksa identitas mitra dan Kantor Pos pembina sebelum memberikan akses layanan.',allowed:admin,component:<Approvals/>},
     audit:{title:'Riwayat aktivitas',description:'Telusuri tindakan pengguna dan perubahan yang tercatat pada sistem.',allowed:hasPermission('audit.view'),component:<Audit/>},
     settings:{title:'Pengaturan layanan',description:'Pantau koneksi dan kelola konfigurasi layanan yang digunakan.',allowed:admin,component:<Settings/>},
     reports:{title:'Kinerja operator',description:'Lihat aktivitas serta penyelesaian tiket berdasarkan periode yang dipilih.',allowed:hasPermission('operator.stats_view'),component:<Productivity/>}

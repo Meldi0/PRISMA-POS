@@ -168,7 +168,7 @@ export const SlaGuideModal: React.FC<SlaGuideModalProps> = ({ isOpen, onClose })
                   <div>
                     <h5 className="font-bold text-sm sm:text-base text-[#0F172A]">UPT Quality Control & Security</h5>
                     <p className="text-xs sm:text-sm text-[#64748B] mt-0.5 leading-relaxed">
-                      Audit standar kepatuhan SLA dinas, rekaman CCTV, akses fisik kantor, dan investigasi keamanan.
+                      Audit standar kepatuhan SLA operasional, rekaman CCTV, keamanan fisik, dan investigasi.
                     </p>
                   </div>
                 </div>

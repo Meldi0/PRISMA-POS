@@ -95,11 +95,12 @@ export const UserApprovalManagement: React.FC<UserApprovalManagementProps> = ({ 
       });
 
       if (res.status === 'success') {
-        success(`Akun dinas untuk ${selectedApproval.name} (${selectedApproval.email}) berhasil disetujui & diaktifkan.`);
+        success(`Akun Agen Pos untuk ${selectedApproval.name} (${selectedApproval.email}) berhasil disetujui & diaktifkan.`);
         setSelectedApproval(null);
-        fetchApprovals();
+        window.dispatchEvent(new CustomEvent('approvals-updated'));
+        await fetchApprovals();
       } else {
-        toastError(res.message || 'Gagal menyetujui akun dinas.');
+        toastError(res.message || 'Gagal menyetujui akun Agen Pos.');
       }
     } catch (err: any) {
       toastError(err.message || 'Terjadi kesalahan sistem.');
@@ -147,7 +148,7 @@ export const UserApprovalManagement: React.FC<UserApprovalManagementProps> = ({ 
         <div>
           <div className="flex items-center gap-2.5">
             <h2 className="text-lg font-black text-[#0F172A] tracking-tight">
-              Persetujuan Registrasi Staf Dinas
+              Persetujuan Registrasi Mitra Agen Pos
             </h2>
             {pendingTotal > 0 && (
               <span className="px-2.5 py-0.5 rounded-full bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold">
@@ -156,7 +157,7 @@ export const UserApprovalManagement: React.FC<UserApprovalManagementProps> = ({ 
             )}
           </div>
           <p className="text-xs text-[#64748B] mt-0.5">
-            Verifikasi identitas dan penugasan cakupan data sebelum akun dinas diaktifkan.
+            Verifikasi identitas mitra agen, nomor kontak, dan kantor pembina sebelum akun diaktifkan.
           </p>
         </div>
 
@@ -253,12 +254,15 @@ export const UserApprovalManagement: React.FC<UserApprovalManagementProps> = ({ 
                       <td className="py-3.5 px-4">
                         <div className="font-bold text-[#0F172A] text-[13px]">{app.name}</div>
                         <div className="text-[11px] text-[#0D5C75] font-medium">{app.email}</div>
-                        <div className="text-[11px] text-[#64748B] flex items-center gap-2 mt-0.5">
-                          {app.position && (
-                            <span className="font-semibold text-slate-700">{app.position}</span>
+                        <div className="text-[11px] text-[#64748B] flex items-center gap-2 mt-0.5 flex-wrap">
+                          {(app.phone || app.phone_number) && (
+                            <span className="font-semibold text-emerald-700">WA: {app.phone || app.phone_number}</span>
                           )}
-                          {app.phone_number && (
-                            <span>• {app.phone_number}</span>
+                          {(app.nopen || app.nip) && (
+                            <span className="font-mono font-medium text-slate-700">• No. Agen: {app.nopen || app.nip}</span>
+                          )}
+                          {app.position && (
+                            <span>• {app.position}</span>
                           )}
                         </div>
                       </td>
@@ -386,17 +390,19 @@ export const UserApprovalManagement: React.FC<UserApprovalManagementProps> = ({ 
                   <CheckCircle2 size={22} />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-[#0F172A]">Setujui Akun Dinas</h3>
-                  <p className="text-xs text-[#64748B]">Verifikasi penugasan role dan scope pemohon</p>
+                  <h3 className="text-base font-bold text-[#0F172A]">Setujui Akun Agen Pos</h3>
+                  <p className="text-xs text-[#64748B]">Verifikasi data pemohon dan penugasan akses</p>
                 </div>
               </div>
 
               <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-xs space-y-1.5">
                 <p><strong>Nama:</strong> {selectedApproval.name}</p>
                 <p><strong>Email:</strong> {selectedApproval.email}</p>
-                <p><strong>Jabatan:</strong> {selectedApproval.position || '-'}</p>
+                <p><strong>No. HP / WhatsApp:</strong> {selectedApproval.phone || selectedApproval.phone_number || '-'}</p>
+                <p><strong>ID User / Nopen:</strong> {selectedApproval.nopen || selectedApproval.nip || '-'}</p>
+                <p><strong>Peran / Posisi:</strong> {selectedApproval.position || '-'}</p>
                 <p><strong>Regional:</strong> {selectedApproval.region_name || '-'}</p>
-                <p><strong>Kantor:</strong> {selectedApproval.office_name || '-'}</p>
+                <p><strong>Kantor Pos Pembina:</strong> {selectedApproval.office_name || '-'}</p>
               </div>
 
               <div className="space-y-3 pt-1">
@@ -414,7 +420,7 @@ export const UserApprovalManagement: React.FC<UserApprovalManagementProps> = ({ 
                     }}
                     className="w-full h-10 px-3 rounded-lg border border-[#CBD5E1] text-xs font-semibold focus:border-[#0D5C75] focus:outline-none"
                   >
-                    <option value="UPT_LUAR">UPT_LUAR (Pelapor / Staf Unit Kantor Cabang / Regional)</option>
+                    <option value="UPT_LUAR">UPT_LUAR (Mitra Agen Pos / Pelapor)</option>
                     <option value="PETUGAS_UPT">PETUGAS_UPT (Petugas Helpdesk UPT Pusat)</option>
                     <option value="ADMIN">ADMIN (Super Administrator)</option>
                   </select>
@@ -492,7 +498,7 @@ export const UserApprovalManagement: React.FC<UserApprovalManagementProps> = ({ 
                   rows={3}
                   value={rejectionReason}
                   onChange={(e) => setRejectionReason(e.target.value)}
-                  placeholder="Cth: Data NIP / Penempatan tidak sesuai dengan sistem kepegawaian dinas."
+                  placeholder="Cth: Data Nopen / Kontak WA / Kantor Pembina tidak sesuai dengan data mitra agen resmi."
                   className="w-full p-3 rounded-xl border border-[#CBD5E1] text-xs focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-500/15"
                 />
               </div>

@@ -51,9 +51,9 @@ export function OrganizationFields({ region, office, onChange }: { region: strin
         </Field>
 
         <Field
-          label="Kantor penempatan"
+          label="Kantor Pos Pembina / Cabang (KCU/KC/KCP)"
           required
-          hint="Ketik nama kantor atau unit kerja Anda saat ini secara manual."
+          hint="Ketik nama Kantor Pos induk / pembina agen Anda (contoh: KCU Bandung, KC Soreang)."
         >
           <input
             className="input"
@@ -62,7 +62,7 @@ export function OrganizationFields({ region, office, onChange }: { region: strin
             value={office}
             required
             maxLength={150}
-            placeholder="Contoh: KCU Bandung / KCP Soreang / Kantor Pos..."
+            placeholder="Contoh: KCU Bandung / KC Soreang / KCP..."
             onChange={e => onChange(region, e.target.value)}
           />
           {offices.length > 0 && (

@@ -56,7 +56,7 @@ export function getTransporter() {
  */
 export async function sendOtpEmail({ toEmail, recipientName, otpCode }) {
   const subject = 'Kode verifikasi PRISMA POS';
-  const safeName = String(recipientName || 'Petugas Kedinasan').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+  const safeName = String(recipientName || 'Mitra Agen Pos').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 
   const htmlContent = `
     <!DOCTYPE html>
@@ -116,7 +116,7 @@ export async function sendOtpEmail({ toEmail, recipientName, otpCode }) {
   `;
 
   const currentTransporter = getTransporter();
-  const currentEmailFrom = process.env.EMAIL_FROM || (process.env.SMTP_USER ? `"PRISMA POS Kedinasan" <${process.env.SMTP_USER}>` : '"PRISMA POS Helpdesk" <no-reply@poso.local>');
+  const currentEmailFrom = process.env.EMAIL_FROM || (process.env.SMTP_USER ? `"PRISMA POS Helpdesk Agen" <${process.env.SMTP_USER}>` : '"PRISMA POS Helpdesk" <no-reply@poso.local>');
 
   if (currentTransporter) {
     try {

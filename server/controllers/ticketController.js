@@ -59,7 +59,7 @@ export const getTickets = endpoint(async (req, res) => {
   const filter = queryFilter(req);
   const [[count]] = await pool.query('SELECT COUNT(*) AS total FROM tickets t WHERE ' + filter.sql, filter.params);
   const [rows] = await pool.query(`SELECT t.ticket_id, t.subject, t.category, t.department, t.topic, t.location, t.region_id, t.office_id,
-    t.description, t.priority, t.status, t.channel, t.requester_id, t.requester_name, t.requester_email, t.requester_nip,
+    t.description, t.priority, t.status, t.channel, t.requester_id, t.requester_name, t.requester_email, t.requester_phone, t.requester_nip,
     t.assigned_upt, t.assigned_operator, t.sla_due_at, t.resolved_at, t.closed_at, t.is_archived, t.reopen_status, t.version, t.created_at, t.updated_at,
     JSON_LENGTH(t.attachments) AS attachment_count, r.name AS region_name, r.code AS region_code, o.name AS office_name, o.code AS office_code
     FROM tickets t LEFT JOIN regions r ON r.region_id = t.region_id LEFT JOIN offices o ON o.office_id = t.office_id
@@ -104,9 +104,9 @@ export const createTicket = endpoint(async (req, res) => {
     }
     const ticketId = id('TICK');
     await db.query(`INSERT INTO tickets (ticket_id, subject, category, department, topic, location, description, priority, status, channel,
-      requester_id, requester_name, requester_email, requester_nip, region_id, office_id, assigned_upt, sla_due_at, attachments, idempotency_key)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', 'web', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [ticketId, subject, department, department, topic, location, description, priority, req.user.user_id, req.user.name, req.user.email, req.user.nip || null, office.region_id, office.office_id, SERVICE_UNITS[department], new Date(Date.now() + SLA_HOURS[priority] * 3600000), JSON.stringify(attachments), requestKey]);
+      requester_id, requester_name, requester_email, requester_phone, requester_nip, region_id, office_id, assigned_upt, sla_due_at, attachments, idempotency_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', 'web', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [ticketId, subject, department, department, topic, location, description, priority, req.user.user_id, req.user.name, req.user.email, req.user.phone || null, req.user.nopen || req.user.nip || null, office.region_id, office.office_id, SERVICE_UNITS[department], new Date(Date.now() + SLA_HOURS[priority] * 3600000), JSON.stringify(attachments), requestKey]);
     await addMessage(db, req.user, ticketId, description);
     await audit(db, req.user, 'CREATE_TICKET', ticketId, 'Pengajuan tiket ' + subject, ticketId);
     const [[ticket]] = await db.query('SELECT * FROM tickets WHERE ticket_id = ?', [ticketId]);

@@ -419,7 +419,7 @@ export const SageTicketTrackerView: React.FC<SageTicketTrackerViewProps> = ({ re
               <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-1">
                 <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#64748B]">
                   <MapPin className="w-3.5 h-3.5 text-[#002B49]" />
-                  <span>Lokasi Penempatan</span>
+                  <span>Kantor Pos Pembina</span>
                 </div>
                 <p className="text-xs font-bold text-[#0F172A] truncate" title={parsedTicket.location}>
                   {parsedTicket.location}
