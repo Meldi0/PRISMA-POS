@@ -295,26 +295,35 @@ class PosoApiService {
     return this.request<Role[]>('/roles', { method: 'GET' });
   }
 
+  async getOperators(): Promise<ApiResponse<User[]>> {
+    return this.request<User[]>('/operators', { method: 'GET' });
+  }
+
   // -----------------------------------------------------------------------------------------------
   // AUTHENTICATION & MFA
   // -----------------------------------------------------------------------------------------------
 
-  async login(params: { email: string; password: string }): Promise<ApiResponse<{ token?: string; user?: User }>> {
-    const res = await this.request<{ token?: string; user?: User }>('/auth/login', {
+  async login(params: { email: string; password: string; remember_me?: boolean }): Promise<ApiResponse<{ token?: string; user?: User; device_token?: string }>> {
+    localStorage.setItem('poso_remember', params.remember_me ? 'true' : 'false');
+    const device_token = localStorage.getItem('poso_device_token') || undefined;
+    const res = await this.request<{ token?: string; user?: User; device_token?: string }>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify(params)
+      body: JSON.stringify({ ...params, device_token })
     });
 
     if (res.status === 'success' && res.data?.token && res.data?.user) {
       this.setStoredToken(res.data.token);
       this.setStoredUser(res.data.user);
+      if (res.data.device_token) {
+        localStorage.setItem('poso_device_token', res.data.device_token);
+      }
     }
 
     return res;
   }
 
-  async verifyMfa(params: { challenge_token: string; otp_code: string }): Promise<ApiResponse<{ token: string; user: User }>> {
-    const res = await this.request<{ token: string; user: User }>('/auth/mfa/verify', {
+  async verifyMfa(params: { challenge_token: string; otp_code: string }): Promise<ApiResponse<{ token: string; user: User; device_token?: string }>> {
+    const res = await this.request<{ token: string; user: User; device_token?: string }>('/auth/mfa/verify', {
       method: 'POST',
       body: JSON.stringify(params)
     });
@@ -322,6 +331,9 @@ class PosoApiService {
     if (res.status === 'success' && res.data) {
       this.setStoredToken(res.data.token);
       this.setStoredUser(res.data.user);
+      if (res.data.device_token) {
+        localStorage.setItem('poso_device_token', res.data.device_token);
+      }
     }
 
     return res;
@@ -334,8 +346,8 @@ class PosoApiService {
     });
   }
 
-  async setupMfa(): Promise<ApiResponse<{ secret: string; qr_uri: string; backup_codes: string[] }>> {
-    return this.request('/auth/mfa/setup', { method: 'POST' });
+  async setupMfa(current_password?: string): Promise<ApiResponse<{ secret: string; qr_uri: string; backup_codes: string[] }>> {
+    return this.request('/auth/mfa/setup', { method: 'POST', body: JSON.stringify({ current_password }) });
   }
 
   async confirmMfa(params: { code: string }): Promise<ApiResponse<any>> {
@@ -343,6 +355,20 @@ class PosoApiService {
       method: 'POST',
       body: JSON.stringify(params)
     });
+  }
+
+  async changePassword(current_password: string, new_password: string): Promise<ApiResponse<any>> {
+    return this.request('/auth/password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password, new_password })
+    });
+  }
+
+  async logout(): Promise<ApiResponse<any>> {
+    const res = await this.request('/auth/logout', { method: 'POST' });
+    this.setStoredToken(null);
+    this.setStoredUser(null);
+    return res;
   }
 
   async register(params: {
@@ -396,6 +422,13 @@ class PosoApiService {
     return this.request(endpoint, { method: 'GET' });
   }
 
+  async getTicketSummary(params?: { search?: string; category?: string }): Promise<ApiResponse<any>> {
+    const query = new URLSearchParams();
+    if (params?.search) query.set('search', params.search);
+    if (params?.category && params.category !== 'all') query.set('category', params.category);
+    return this.request(`/tickets/summary${query.toString() ? `?${query.toString()}` : ''}`, { method: 'GET' });
+  }
+
   async getTicketDetail(ticketId: string): Promise<ApiResponse<{ ticket: Ticket; threads: ThreadMessage[] }>> {
     return this.request<{ ticket: Ticket; threads: ThreadMessage[] }>(`/tickets/${encodeURIComponent(ticketId)}`, {
       method: 'GET'
@@ -428,6 +461,7 @@ class PosoApiService {
     assigned_upt?: string;
     assigned_operator?: string;
     attachments?: Array<{ name: string; size?: string; type?: string; dataUrl?: string; url?: string }>;
+    idempotency_key?: string;
   }): Promise<ApiResponse<Ticket>> {
     return this.request<Ticket>('/tickets', {
       method: 'POST',
@@ -437,6 +471,7 @@ class PosoApiService {
 
   async updateTicketStatus(payload: {
     ticket_id: string;
+    version?: number;
     status?: TicketStatus;
     priority?: TicketPriority;
     assigned_upt?: string;
@@ -462,6 +497,7 @@ class PosoApiService {
     ticket_id: string;
     message: string;
     visibility?: 'public' | 'internal';
+    idempotency_key?: string;
     sender_name?: string;
     sender_id?: string;
     sender_role?: string;

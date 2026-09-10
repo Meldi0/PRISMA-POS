@@ -1,4 +1,5 @@
 import { pool } from '../config/db.js';
+import { normalizeRole, scopeFor } from './access.js';
 
 /**
  * Resolve user permissions using the priority:
@@ -20,7 +21,7 @@ export async function resolveUserPermissions(userId, roleCode) {
   // 2. Fetch role baseline permissions
   const [rolePerms] = await pool.query(
     'SELECT permission_id, effect FROM role_permissions WHERE role_code = ?',
-    [roleCode]
+    [normalizeRole(roleCode) || roleCode]
   );
   const roleMap = {};
   rolePerms.forEach(rp => {
@@ -87,41 +88,12 @@ export async function resolveUserPermissions(userId, roleCode) {
  * @returns {{ clause: string, params: Array<any> }}
  */
 export function buildDataScopeFilter(user, tableAlias = 'tickets') {
-  if (!user) {
-    return { clause: '1=0', params: [] }; // No user = access denied
-  }
-
-  const role = user.role;
-  const scope = user.data_scope || (
-    role === 'ADMIN' || role === 'PETUGAS_UPT' || role === 'ADMIN_PUSAT' || role === 'OPERATOR' || role === 'admin' || role === 'operator'
-      ? 'GLOBAL'
-      : 'OFFICE'
-  );
-
-  // 1. GLOBAL Scope: ADMIN & PETUGAS_UPT (Kantor Pusat) can see and manage all tickets nationally
-  if (
-    role === 'ADMIN' || 
-    role === 'PETUGAS_UPT' || 
-    role === 'ADMIN_PUSAT' || 
-    role === 'OPERATOR' || 
-    role === 'admin' || 
-    role === 'operator' || 
-    scope === 'GLOBAL'
-  ) {
-    return { clause: '1=1', params: [] };
-  }
-
-  // 2. UPT_LUAR (Office Scope): Sees tickets created by oneself OR coworkers within the same office (office_id)
-  if (user.office_id) {
-    return {
-      clause: `((LOWER(${tableAlias}.requester_email) = ? OR LOWER(${tableAlias}.requester_name) = ?) OR (${tableAlias}.office_id IS NOT NULL AND ${tableAlias}.office_id = ?))`,
-      params: [user.email.toLowerCase().trim(), user.name.toLowerCase().trim(), user.office_id]
-    };
-  }
-
-  // 3. Fallback OWN scope if no office_id is assigned
-  return {
-    clause: `(LOWER(${tableAlias}.requester_email) = ? OR LOWER(${tableAlias}.requester_name) = ?)`,
-    params: [user.email.toLowerCase().trim(), user.name.toLowerCase().trim()]
-  };
+  if (!user || user.isBlocked || !user.is_active || user.account_status !== 'ACTIVE') return { clause: '1=0', params: [] };
+  const scope = scopeFor(user);
+  if (scope === 'GLOBAL') return { clause: '1=1', params: [] };
+  const own = `(${tableAlias}.requester_id = ? OR (${tableAlias}.requester_id IS NULL AND LOWER(${tableAlias}.requester_email) = ?))`;
+  const params = [user.user_id, user.email.toLowerCase().trim()];
+  if (scope === 'REGIONAL' && user.region_id) return { clause: `(${own} OR ${tableAlias}.region_id = ?)`, params: [...params, user.region_id] };
+  if (scope === 'OFFICE' && user.office_id) return { clause: `(${own} OR ${tableAlias}.office_id = ?)`, params: [...params, user.office_id] };
+  return { clause: own, params };
 }

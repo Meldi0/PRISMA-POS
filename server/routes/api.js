@@ -7,6 +7,7 @@ import * as approvalController from '../controllers/approvalController.js';
 import * as analyticsController from '../controllers/analyticsController.js';
 import * as dbConfigController from '../controllers/dbConfigController.js';
 import { pool } from '../config/db.js';
+import { rateLimit } from '../middleware/securityMiddleware.js';
 
 const router = express.Router();
 
@@ -41,17 +42,21 @@ router.get('/health', async (req, res) => {
 // -------------------------------------------------------------------------------------------------
 router.get('/regions', userController.getRegions);
 router.get('/offices', userController.getOffices);
-router.get('/roles', userController.getRoles);
+router.get('/roles', requireAuth, userController.getRoles);
+router.get('/operators', requireAuth, requireRole(['ADMIN','PETUGAS_UPT']), userController.getOperators);
 
 // -------------------------------------------------------------------------------------------------
 // 3. AUTHENTICATION & MFA
 // -------------------------------------------------------------------------------------------------
-router.post('/auth/login', authController.login);
+router.use('/auth', rateLimit('auth', 60));
+router.post('/auth/login', rateLimit('login', 20), authController.login);
 router.post('/auth/mfa/verify', authController.verifyMfa);
 router.post('/auth/verify-mfa', authController.verifyMfa);
 router.post('/auth/mfa/resend', authController.resendMfaOtp);
 router.post('/auth/resend-mfa', authController.resendMfaOtp);
-router.post('/auth/register', authController.register);
+router.post('/auth/register', rateLimit('registration', 5, 3600), authController.register);
+router.post('/auth/logout', requireAuth, authController.logout);
+router.post('/auth/password', requireAuth, authController.changePassword);
 router.get('/auth/me', requireAuth, authController.getProfile);
 router.post('/auth/mfa/setup', requireAuth, authController.setupMfa);
 router.post('/auth/mfa/confirm', requireAuth, authController.confirmMfa);
@@ -59,19 +64,23 @@ router.post('/auth/mfa/confirm', requireAuth, authController.confirmMfa);
 // -------------------------------------------------------------------------------------------------
 // 4. TICKETS & THREADS
 // -------------------------------------------------------------------------------------------------
-router.get('/tickets', ticketController.getTickets);
-router.post('/tickets', ticketController.createTicket);
+router.use('/tickets', requireAuth);
+router.get('/tickets', requirePermission(['ticket.view', 'ticket.view_own']), ticketController.getTickets);
+router.post('/tickets', requirePermission('ticket.create'), rateLimit('create-ticket', 30, 3600), ticketController.createTicket);
+router.get('/tickets/summary', requirePermission(['ticket.view', 'ticket.view_own']), ticketController.getTicketSummary);
 router.get('/tickets/track/:id', ticketController.trackTicket);
 router.get('/tickets/:id', ticketController.getTicketDetail);
-router.patch('/tickets/:id/status', requireAuth, requirePermission(['ticket.change_status', 'ticket.resolve', 'ticket.close']), ticketController.updateTicketStatus);
-router.post('/tickets/:id/threads', ticketController.addThreadMessage);
+router.patch('/tickets/:id/status', ticketController.updateTicketStatus);
+router.post('/tickets/:id/threads', rateLimit('ticket-reply', 60, 900), ticketController.addThreadMessage);
 router.post('/tickets/:id/request-reopen', ticketController.requestTicketReopen);
-router.post('/tickets/:id/reopen-review', requireAuth, ticketController.reviewTicketReopen);
+router.post('/tickets/:id/reopen-review', requirePermission('ticket.reopen'), ticketController.reviewTicketReopen);
 router.get('/tickets/:id/reopen-requests', ticketController.getTicketReopenRequests);
 
 // -------------------------------------------------------------------------------------------------
 // 5. USER REGISTRATION APPROVAL (Admin Pusat)
 // -------------------------------------------------------------------------------------------------
+// User/permission mutations are administrator operations; delegated view permissions remain read-only.
+router.use('/admin', (req, res, next) => req.method === 'GET' ? next() : requireRole('ADMIN')(req, res, next));
 router.get('/admin/approvals', requireAuth, requirePermission(['approval.view', 'user.approve']), approvalController.getApprovals);
 router.post('/admin/approvals/:id/approve', requireAuth, requirePermission(['approval.manage', 'user.approve']), approvalController.approveRegistration);
 router.post('/admin/approvals/:id/reject', requireAuth, requirePermission(['approval.manage', 'user.reject']), approvalController.rejectRegistration);
@@ -99,7 +108,7 @@ router.post('/admin/users/:id/reset-mfa', requireAuth, requirePermission(['user.
 router.get('/admin/audit-logs', requireAuth, requirePermission(['audit.view', 'audit_log.view']), analyticsController.getAuditLogs);
 router.get('/admin/features', requireAuth, analyticsController.getFeatureFlags);
 router.put('/admin/features', requireAuth, requireRole(['ADMIN', 'ADMIN_PUSAT', 'admin']), analyticsController.updateFeatureFlags);
-router.get('/admin/db-status', requireAuth, analyticsController.getDbStatus);
+router.get('/admin/db-status', requireAuth, requireRole('ADMIN'), analyticsController.getDbStatus);
 
 // Database Configuration & Switcher (Role Admin Only)
 router.get('/admin/db-config', requireAuth, requireRole(['ADMIN', 'ADMIN_PUSAT', 'admin']), dbConfigController.getDbConfig);

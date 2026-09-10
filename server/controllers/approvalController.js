@@ -1,4 +1,7 @@
 import { pool } from '../config/db.js';
+import { validateOrganization } from './userController.js';
+import { normalizeRole } from '../utils/access.js';
+import { HttpError, text, choice, transaction, audit, endpoint } from '../utils/security.js';
 
 /**
  * Get all registration approval requests
@@ -30,7 +33,7 @@ export async function getApprovals(req, res) {
         u.user_id, u.name, u.email, u.position, u.nip,
         u.role, u.account_status, u.data_scope, u.region_id, u.office_id,
         r.name AS region_name, r.code AS region_code,
-        o.name AS office_name, o.code AS office_code, o.code AS nopen_kc
+        COALESCE(o.name, u.office_id) AS office_name, o.code AS office_code, o.code AS nopen_kc
       FROM registration_approvals ra
       JOIN users u ON ra.user_id = u.user_id
       LEFT JOIN regions r ON u.region_id = r.region_id
@@ -54,164 +57,27 @@ export async function getApprovals(req, res) {
   }
 }
 
-/**
- * Approve pending user registration
- */
-export async function approveRegistration(req, res) {
-  try {
-    const adminUser = req.user;
-    const { id } = req.params; // user_id or approval_id
-    const { role, data_scope, region_id, office_id } = req.body;
-
-    // Find user
-    const [uRows] = await pool.query(
-      'SELECT * FROM users WHERE user_id = ? OR user_id = (SELECT user_id FROM registration_approvals WHERE approval_id = ? LIMIT 1) LIMIT 1',
-      [id, id]
-    );
-
-    if (uRows.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        code: 404,
-        message: 'Data permohonan pengguna tidak ditemukan.'
-      });
-    }
-
-    const targetUser = uRows[0];
-
-    // Determine final role & scope
-    const assignedRole = role || targetUser.role || 'PELAPOR';
-    const assignedScope = data_scope || targetUser.data_scope || (
-      assignedRole === 'ADMIN' || assignedRole === 'PETUGAS_UPT' || assignedRole === 'ADMIN_PUSAT' || assignedRole === 'OPERATOR'
-        ? 'GLOBAL'
-        : 'OFFICE'
-    );
-    const assignedRegion = region_id !== undefined ? region_id : targetUser.region_id;
-    const assignedOffice = office_id !== undefined ? office_id : targetUser.office_id;
-
-    // 1. Update User to ACTIVE
-    await pool.query(`
-      UPDATE users SET
-        account_status = 'ACTIVE',
-        is_active = 1,
-        role = ?,
-        data_scope = ?,
-        region_id = ?,
-        office_id = ?,
-        updated_at = NOW()
-      WHERE user_id = ?
-    `, [assignedRole, assignedScope, assignedRegion || null, assignedOffice || null, targetUser.user_id]);
-
-    // 2. Update Registration Approval
-    await pool.query(`
-      UPDATE registration_approvals SET
-        status = 'APPROVED',
-        reviewed_by = ?,
-        reviewer_name = ?,
-        reviewed_at = NOW()
-      WHERE user_id = ?
-    `, [adminUser.user_id, adminUser.name, targetUser.user_id]);
-
-    // 3. Audit Log
-    try {
-      await pool.query(`
-        INSERT INTO audit_logs (log_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
-        VALUES (?, ?, ?, ?, 'APPROVE_USER', 'USER', ?, ?, ?)
-      `, [
-        `LOG-${Date.now().toString().slice(-6)}`, adminUser.user_id, adminUser.name, adminUser.role,
-        targetUser.user_id, `Disetujui role ${assignedRole} scope ${assignedScope}`,
-        `Admin menyetujui pendaftaran akun ${targetUser.email} (${targetUser.name})`
-      ]);
-    } catch (e) {}
-
-    return res.status(200).json({
-      status: 'success',
-      message: `Pendaftaran ${targetUser.name} (${targetUser.email}) berhasil disetujui. Akun kini aktif.`
-    });
-  } catch (err) {
-    console.error('Error in approveRegistration:', err);
-    return res.status(500).json({
-      status: 'error',
-      code: 500,
-      message: 'Gagal menyetujui pendaftaran pengguna.'
-    });
-  }
-}
-
-/**
- * Reject pending user registration with mandatory reason
- */
-export async function rejectRegistration(req, res) {
-  try {
-    const adminUser = req.user;
-    const { id } = req.params;
-    const { reason } = req.body;
-
-    if (!reason || !reason.trim()) {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Alasan penolakan wajib diisi secara jelas.'
-      });
-    }
-
-    const [uRows] = await pool.query(
-      'SELECT * FROM users WHERE user_id = ? OR user_id = (SELECT user_id FROM registration_approvals WHERE approval_id = ? LIMIT 1) LIMIT 1',
-      [id, id]
-    );
-
-    if (uRows.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        code: 404,
-        message: 'Data permohonan pengguna tidak ditemukan.'
-      });
-    }
-
-    const targetUser = uRows[0];
-
-    // 1. Update User to REJECTED
-    await pool.query(`
-      UPDATE users SET
-        account_status = 'REJECTED',
-        is_active = 0,
-        updated_at = NOW()
-      WHERE user_id = ?
-    `, [targetUser.user_id]);
-
-    // 2. Update Registration Approval
-    await pool.query(`
-      UPDATE registration_approvals SET
-        status = 'REJECTED',
-        rejection_reason = ?,
-        reviewed_by = ?,
-        reviewer_name = ?,
-        reviewed_at = NOW()
-      WHERE user_id = ?
-    `, [reason.trim(), adminUser.user_id, adminUser.name, targetUser.user_id]);
-
-    // 3. Audit Log
-    try {
-      await pool.query(`
-        INSERT INTO audit_logs (log_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
-        VALUES (?, ?, ?, ?, 'REJECT_USER', 'USER', ?, ?, ?)
-      `, [
-        `LOG-${Date.now().toString().slice(-6)}`, adminUser.user_id, adminUser.name, adminUser.role,
-        targetUser.user_id, `Alasan: ${reason.trim()}`,
-        `Admin menolak pendaftaran akun ${targetUser.email}. Alasan: ${reason.trim()}`
-      ]);
-    } catch (e) {}
-
-    return res.status(200).json({
-      status: 'success',
-      message: `Pendaftaran ${targetUser.name} telah ditolak dengan alasan: "${reason.trim()}".`
-    });
-  } catch (err) {
-    console.error('Error in rejectRegistration:', err);
-    return res.status(500).json({
-      status: 'error',
-      code: 500,
-      message: 'Gagal menolak pendaftaran pengguna.'
-    });
-  }
-}
+const review = (approved) => endpoint(async (req, res) => {
+  const reason = approved ? null : text(req.body.reason, 'Alasan penolakan', { min: 10, max: 2000 });
+  await transaction(pool, async db => {
+    const [[approval]] = await db.query('SELECT * FROM registration_approvals WHERE approval_id = ? OR user_id = ? ORDER BY created_at DESC LIMIT 1 FOR UPDATE', [req.params.id, req.params.id]);
+    if (!approval) throw new HttpError(404, 'Permohonan tidak ditemukan.');
+    if (approval.status !== 'PENDING') throw new HttpError(409, 'Permohonan ini sudah diproses.');
+    const [[user]] = await db.query('SELECT * FROM users WHERE user_id = ? FOR UPDATE', [approval.user_id]);
+    if (!user || user.account_status !== 'PENDING') throw new HttpError(409, 'Akun tidak sedang menunggu persetujuan.');
+    if (approved) {
+      const role = normalizeRole(req.body.role || user.role);
+      if (!role) throw new HttpError(400, 'Peran tidak valid.');
+      const scope = choice(req.body.data_scope || user.data_scope, ['OWN','OFFICE','REGIONAL','GLOBAL'], 'Cakupan');
+      const region = req.body.region_id || user.region_id;
+      const office = req.body.office_id || user.office_id;
+      const finalOfficeId = await validateOrganization(db, region, office);
+      await db.query("UPDATE users SET role = ?, data_scope = ?, region_id = ?, office_id = ?, account_status = 'ACTIVE', is_active = 1 WHERE user_id = ?", [role, scope, region, finalOfficeId, user.user_id]);
+    } else await db.query("UPDATE users SET account_status = 'REJECTED', is_active = 0 WHERE user_id = ?", [user.user_id]);
+    await db.query('UPDATE registration_approvals SET status = ?, reviewed_by = ?, reviewer_name = ?, rejection_reason = ?, reviewed_at = NOW() WHERE approval_id = ?', [approved ? 'APPROVED' : 'REJECTED', req.user.user_id, req.user.name, reason, approval.approval_id]);
+    await audit(db, req.user, approved ? 'APPROVE_USER' : 'REJECT_USER', user.user_id, reason || 'Pendaftaran disetujui');
+  });
+  res.json({ status: 'success', message: approved ? 'Pendaftaran disetujui. Pengguna dapat masuk.' : 'Pendaftaran ditolak dengan alasan yang diberikan.' });
+});
+export const approveRegistration = review(true);
+export const rejectRegistration = review(false);

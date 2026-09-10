@@ -42,7 +42,12 @@ export function getTransporter() {
     host,
     port,
     secure: port === 465,
-    auth: { user, pass }
+    auth: { user, pass },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+    requireTLS: port !== 465,
+    tls: { minVersion: 'TLSv1.2', rejectUnauthorized: true }
   });
 }
 
@@ -50,7 +55,8 @@ export function getTransporter() {
  * Kirim email kode OTP ke alamat email / Gmail pengguna
  */
 export async function sendOtpEmail({ toEmail, recipientName, otpCode }) {
-  const subject = `Kode OTP Masuk Sistem Helpdesk POSO: ${otpCode}`;
+  const subject = 'Kode verifikasi PRISMA POS';
+  const safeName = String(recipientName || 'Petugas Kedinasan').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 
   const htmlContent = `
     <!DOCTYPE html>
@@ -82,7 +88,7 @@ export async function sendOtpEmail({ toEmail, recipientName, otpCode }) {
           <p>PRISMA POS — Sistem Helpdesk & Tiket Terpadu</p>
         </div>
         <div class="content">
-          <div class="greeting">Halo, ${recipientName || 'Petugas Kedinasan'}</div>
+          <div class="greeting">Halo, ${safeName}</div>
           <div class="message">
             Kami menerima permintaan masuk (*sign-in*) ke akun PRISMA POS Anda. Gunakan 6-digit kode OTP (One-Time Password) berikut untuk menyelesaikan proses verifikasi:
           </div>
@@ -109,13 +115,6 @@ export async function sendOtpEmail({ toEmail, recipientName, otpCode }) {
     </html>
   `;
 
-  // Log ke console terminal agar terlihat jelas di log server
-  console.log('=================================================================');
-  console.log(`[EMAIL OTP SENDER] Mengirim kode OTP ke: ${toEmail}`);
-  console.log(`[EMAIL OTP SENDER] Subjek: ${subject}`);
-  console.log(`[EMAIL OTP SENDER] KODE OTP: ${otpCode}`);
-  console.log('=================================================================');
-
   const currentTransporter = getTransporter();
   const currentEmailFrom = process.env.EMAIL_FROM || (process.env.SMTP_USER ? `"PRISMA POS Kedinasan" <${process.env.SMTP_USER}>` : '"PRISMA POS Helpdesk" <no-reply@poso.local>');
 
@@ -127,15 +126,12 @@ export async function sendOtpEmail({ toEmail, recipientName, otpCode }) {
         subject,
         html: htmlContent
       });
-      console.log(`[EMAIL OTP SENDER] ✓ Email berhasil terkirim via SMTP (${info.messageId})`);
       return { success: true, messageId: info.messageId, mode: 'SMTP' };
     } catch (err) {
-      console.error('[EMAIL OTP SENDER] Gagal mengirim via SMTP:', err.message);
-      return { success: false, error: err.message, mode: 'SMTP_FAILED_LOGGED' };
+      console.error('[Mailer] Pengiriman gagal:', err.code || 'SMTP_ERROR');
+      return { success: false, mode: 'SMTP_FAILED' };
     }
   } else {
-    console.log('[EMAIL OTP SENDER] Mode Simulasi Aktif (SMTP_USER / SMTP_PASS belum diset di .env).');
-    console.log('[EMAIL OTP SENDER] Kode OTP berhasil dicatat di console untuk pengujian dinas.');
-    return { success: true, mode: 'CONSOLE_SIMULATION' };
+    return { success: false, mode: 'SMTP_UNAVAILABLE' };
   }
 }

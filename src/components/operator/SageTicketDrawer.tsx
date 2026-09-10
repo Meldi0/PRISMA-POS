@@ -40,9 +40,10 @@ interface SageTicketDrawerProps {
 }
 
 const validTransitions: Record<TicketStatus, TicketStatus[]> = {
-  open: ['in_progress', 'closed'],
-  in_progress: ['waiting', 'closed'],
-  waiting: ['in_progress', 'closed'],
+  open: ['in_progress', 'waiting', 'resolved'],
+  in_progress: ['waiting', 'resolved'],
+  waiting: ['in_progress', 'resolved'],
+  resolved: ['in_progress', 'closed'],
   closed: ['open'],
 };
 
@@ -50,6 +51,7 @@ const statusLabels: Record<TicketStatus, string> = {
   open: 'Open',
   in_progress: 'In Progress',
   waiting: 'Menunggu',
+  resolved: 'Solusi Diberikan',
   closed: 'Selesai',
 };
 

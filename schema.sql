@@ -1,194 +1,149 @@
--- =================================================================================================
--- SISTEM HELPDESK & MANAJEMEN TIKET TERPADU (POSO v2.0)
--- Database Schema & Master Seed Data
--- Kompatibel dengan: MySQL 5.7+, MySQL 8.0+, MariaDB 10.3+, phpMyAdmin / XAMPP
--- =================================================================================================
-
-CREATE DATABASE IF NOT EXISTS `poso_helpdesk` 
-DEFAULT CHARACTER SET utf8mb4 
-COLLATE utf8mb4_unicode_ci;
-
-USE `poso_helpdesk`;
-
-SET FOREIGN_KEY_CHECKS = 0;
-
--- -------------------------------------------------------------------------------------------------
--- TABEL 1: users (Data Pengguna & Autentikasi RBAC)
--- -------------------------------------------------------------------------------------------------
-DROP TABLE IF EXISTS `users`;
-CREATE TABLE `users` (
-  `user_id` VARCHAR(50) NOT NULL,
-  `name` VARCHAR(150) NOT NULL,
-  `email` VARCHAR(150) NOT NULL,
-  `password` VARCHAR(255) NOT NULL,
-  `password_plain` VARCHAR(255) DEFAULT NULL,
-  `role` ENUM('admin', 'operator', 'upt', 'pengguna_umum') NOT NULL DEFAULT 'pengguna_umum',
-  `unit_kerja` VARCHAR(100) DEFAULT NULL,
-  `phone` VARCHAR(30) DEFAULT NULL,
-  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`user_id`),
-  UNIQUE KEY `uk_users_email` (`email`),
-  KEY `idx_users_role` (`role`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- -------------------------------------------------------------------------------------------------
--- TABEL 2: tickets (Master Data Tiket Pengaduan)
--- -------------------------------------------------------------------------------------------------
-DROP TABLE IF EXISTS `tickets`;
-CREATE TABLE `tickets` (
-  `ticket_id` VARCHAR(50) NOT NULL,
-  `subject` VARCHAR(255) NOT NULL,
-  `category` VARCHAR(100) NOT NULL,
-  `description` TEXT NOT NULL,
-  `priority` ENUM('Low', 'Medium', 'High', 'Urgent') NOT NULL DEFAULT 'Medium',
-  `status` ENUM('open', 'in_progress', 'waiting', 'closed') NOT NULL DEFAULT 'open',
-  `requester_name` VARCHAR(150) NOT NULL,
-  `requester_email` VARCHAR(150) NOT NULL,
-  `requester_phone` VARCHAR(30) DEFAULT NULL,
-  `assigned_upt` VARCHAR(100) DEFAULT NULL,
-  `assigned_operator` VARCHAR(150) DEFAULT NULL,
-  `sla_due_at` DATETIME DEFAULT NULL,
-  `closed_at` DATETIME DEFAULT NULL,
-  `attachments` JSON DEFAULT NULL,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`ticket_id`),
-  KEY `idx_tickets_status` (`status`),
-  KEY `idx_tickets_priority` (`priority`),
-  KEY `idx_tickets_requester_email` (`requester_email`),
-  KEY `idx_tickets_assigned_upt` (`assigned_upt`),
-  KEY `idx_tickets_created_at` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- -------------------------------------------------------------------------------------------------
--- TABEL 3: threads (Riwayat Diskusi, Chat Pelapor, & Catatan Internal Staf)
--- -------------------------------------------------------------------------------------------------
-DROP TABLE IF EXISTS `threads`;
-CREATE TABLE `threads` (
-  `thread_id` VARCHAR(50) NOT NULL,
-  `ticket_id` VARCHAR(50) NOT NULL,
-  `sender_id` VARCHAR(50) NOT NULL,
-  `sender_name` VARCHAR(150) NOT NULL,
-  `sender_role` VARCHAR(50) NOT NULL DEFAULT 'pengguna_umum',
-  `message` TEXT NOT NULL,
-  `visibility` ENUM('public', 'internal') NOT NULL DEFAULT 'public',
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`thread_id`),
-  KEY `idx_threads_ticket_id` (`ticket_id`),
-  KEY `idx_threads_visibility` (`visibility`),
-  CONSTRAINT `fk_threads_tickets` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`ticket_id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- -------------------------------------------------------------------------------------------------
--- TABEL 4: settings (Konfigurasi Global Sistem & SLA Default)
--- -------------------------------------------------------------------------------------------------
-DROP TABLE IF EXISTS `settings`;
-CREATE TABLE `settings` (
-  `setting_key` VARCHAR(100) NOT NULL,
-  `setting_value` TEXT NOT NULL,
-  `description` VARCHAR(255) DEFAULT NULL,
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`setting_key`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- -------------------------------------------------------------------------------------------------
--- TABEL 5: audit_logs (Log Jejak Rekam Aktivitas & Perubahan Status)
--- -------------------------------------------------------------------------------------------------
-DROP TABLE IF EXISTS `audit_logs`;
-CREATE TABLE `audit_logs` (
-  `log_id` VARCHAR(50) NOT NULL,
-  `ticket_id` VARCHAR(50) DEFAULT NULL,
-  `actor_name` VARCHAR(150) NOT NULL,
-  `actor_role` VARCHAR(50) NOT NULL,
-  `action` VARCHAR(100) NOT NULL,
-  `details` TEXT DEFAULT NULL,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`log_id`),
-  KEY `idx_audit_logs_ticket_id` (`ticket_id`),
-  KEY `idx_audit_logs_created_at` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-SET FOREIGN_KEY_CHECKS = 1;
-
--- -------------------------------------------------------------------------------------------------
--- MASTER SEED DATA (DATA AWAL SIAP PAKAI)
--- -------------------------------------------------------------------------------------------------
-INSERT INTO `users` (`user_id`, `name`, `email`, `password`, `password_plain`, `role`, `unit_kerja`, `phone`, `is_active`) VALUES
-('USR-ADMIN-01', 'Administrator POSO', 'admin@poso.local', 'Admin123!', 'Admin123!', 'admin', 'Direktorat TI & Sistem Informasi', '081234567890', 1),
-('USR-OP-01', 'Operator Helpdesk Utama', 'operator@poso.local', 'Operator123!', 'Operator123!', 'operator', 'Pusat Layanan Terpadu', '081234567891', 1),
-('USR-UPT-TI', 'Staf UPT TI & Jaringan', 'upt.ti@poso.local', 'Poso123!', 'Poso123!', 'upt', 'UPT TI & Jaringan', '081234567892', 1),
-('USR-UPT-SARPRAS', 'Staf UPT Sarana & Prasarana', 'upt.sarpras@poso.local', 'Poso123!', 'Poso123!', 'upt', 'UPT Sarana & Prasarana', '081234567893', 1),
-('USR-PUBLIC-01', 'Dewi Lestari', 'dewi@gmail.com', 'User123!', 'User123!', 'pengguna_umum', 'Pelapor / Pengguna Umum', '089876543210', 1);
-
-INSERT INTO `settings` (`setting_key`, `setting_value`, `description`) VALUES
-('SLA_LOW_HOURS', '72', 'Target penyelesaian tiket prioritas Low (72 Jam)'),
-('SLA_MEDIUM_HOURS', '24', 'Target penyelesaian tiket prioritas Medium (24 Jam)'),
-('SLA_HIGH_HOURS', '8', 'Target penyelesaian tiket prioritas High (8 Jam)'),
-('SLA_URGENT_HOURS', '2', 'Target penyelesaian tiket prioritas Urgent (2 Jam)'),
-('APP_NAME', 'POSO Helpdesk System', 'Nama resmi aplikasi helpdesk'),
-('ORG_NAME', 'PT Pos Indonesia / Institusi Layanan Terpadu', 'Instansi pengelola layanan');
-
-INSERT INTO `tickets` (
-  `ticket_id`, `subject`, `category`, `description`, `priority`, `status`,
-  `requester_name`, `requester_email`, `requester_phone`, `assigned_upt`, `assigned_operator`,
-  `sla_due_at`, `created_at`, `updated_at`
-) VALUES
-(
-  'TICK-20260902-3947',
-  'Kendala Koneksi Wi-Fi & Akses Portal',
-  'Jaringan & Internet',
-  'Koneksi internet di lantai 3 Gedung Graha mengalami gangguan putus-nyambung sejak pagi hari.',
-  'Medium',
-  'open',
-  'Dewi Lestari',
-  'dewi@gmail.com',
-  '089876543210',
-  'UPT TI & Jaringan',
-  'Operator Helpdesk Utama',
-  DATE_ADD(NOW(), INTERVAL 22 HOUR),
-  NOW(),
-  NOW()
-),
-(
-  'TICK-20260901-1002',
-  'AC Ruang Rapat 204 Tidak Dingin & Menetes',
-  'Sarana & Prasarana',
-  'Unit pendingin ruangan di ruang rapat utama lantai 2 meneteskan air dan suhu tidak berubah dingin.',
-  'High',
-  'in_progress',
-  'Budi Santoso',
-  'budi.santoso@poso.local',
-  '081399887766',
-  'UPT Sarana & Prasarana',
-  'Operator Helpdesk Utama',
-  DATE_ADD(NOW(), INTERVAL 6 HOUR),
-  DATE_SUB(NOW(), INTERVAL 2 HOUR),
-  NOW()
-),
-(
-  'TICK-20260901-1003',
-  'Reset Password Akun SSO Kepegawaian',
-  'Layanan Akun & Portal',
-  'Akun SSO terkunci setelah 3 kali salah memasukkan password saat mengakses sistem presensi.',
-  'Urgent',
-  'closed',
-  'Siti Nurhaliza',
-  'siti.nur@poso.local',
-  '085612348765',
-  'UPT TI & Jaringan',
-  'Operator Helpdesk Utama',
-  DATE_SUB(NOW(), INTERVAL 1 HOUR),
-  DATE_SUB(NOW(), INTERVAL 4 HOUR),
-  NOW()
-);
-
-INSERT INTO `threads` (`thread_id`, `ticket_id`, `sender_id`, `sender_name`, `sender_role`, `message`, `visibility`, `created_at`) VALUES
-('TH-001', 'TICK-20260902-3947', 'USR-ADMIN-01', 'Administrator POSO', 'admin', 'Halo Dewi, laporan Anda sudah kami terima dan sedang ditindaklanjuti oleh teknisi jaringan.', 'public', NOW()),
-('TH-002', 'TICK-20260902-3947', 'USR-PUBLIC-01', 'Dewi Lestari', 'pengguna_umum', 'Siap Pak, terima kasih atas bantuannya!', 'public', DATE_ADD(NOW(), INTERVAL 2 MINUTE)),
-('TH-003', 'TICK-20260901-1002', 'USR-OP-01', 'Operator Helpdesk Utama', 'operator', 'Tiket telah didelegasikan ke UPT Sarpras untuk pengecekan freon dan saluran pembuangan.', 'internal', DATE_SUB(NOW(), INTERVAL 1 HOUR));
-
-INSERT INTO `audit_logs` (`log_id`, `ticket_id`, `actor_name`, `actor_role`, `action`, `details`, `created_at`) VALUES
-('LOG-001', 'TICK-20260902-3947', 'Dewi Lestari', 'pengguna_umum', 'CREATE_TICKET', 'Tiket baru berhasil diajukan oleh pelapor.', NOW()),
-('LOG-002', 'TICK-20260902-3947', 'Operator Helpdesk Utama', 'operator', 'ASSIGN_UPT', 'Tiket didelegasikan ke UPT TI & Jaringan.', NOW());
+-- PRISMA POS schema. No DROP statements or demo credentials.
+-- Select your target database before importing, then run npm run migrate.
+CREATE TABLE IF NOT EXISTS users (
+  user_id VARCHAR(50) PRIMARY KEY, name VARCHAR(150) NOT NULL, email VARCHAR(150) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL, role VARCHAR(50) NOT NULL DEFAULT 'UPT_LUAR',
+  is_active TINYINT NOT NULL DEFAULT 1, account_status ENUM('PENDING','ACTIVE','REJECTED','SUSPENDED','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  region_id VARCHAR(50) NULL, office_id VARCHAR(50) NULL, data_scope ENUM('GLOBAL','REGIONAL','OFFICE','OWN') NOT NULL DEFAULT 'OFFICE',
+  mfa_enabled TINYINT NOT NULL DEFAULT 0, failed_attempts INT NOT NULL DEFAULT 0, locked_until DATETIME NULL, last_login_at DATETIME NULL,
+  nip VARCHAR(50) NULL, department VARCHAR(150) NULL, role_title VARCHAR(150) NULL, position VARCHAR(100) NULL, created_by VARCHAR(150) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS tickets (
+  ticket_id VARCHAR(50) PRIMARY KEY, subject VARCHAR(255) NOT NULL, category VARCHAR(100) NOT NULL, department VARCHAR(150) NULL,
+  topic VARCHAR(150) NULL, location VARCHAR(150) NULL, region_id VARCHAR(50) NULL, office_id VARCHAR(50) NULL, description LONGTEXT NOT NULL,
+  priority ENUM('Low','Medium','High','Urgent') NOT NULL DEFAULT 'Medium', status ENUM('open','in_progress','waiting','resolved','closed') NOT NULL DEFAULT 'open',
+  channel ENUM('web','email') NOT NULL DEFAULT 'web', requester_name VARCHAR(150) NULL, requester_email VARCHAR(150) NOT NULL,
+  requester_phone VARCHAR(30) NULL, requester_nip VARCHAR(50) NULL, assigned_upt VARCHAR(100) NULL, assigned_operator VARCHAR(150) NULL,
+  sla_due_at DATETIME NULL, closed_at DATETIME NULL, is_archived TINYINT NOT NULL DEFAULT 0,
+  reopen_status ENUM('NONE','PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'NONE', attachments JSON NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_tickets_created (created_at), INDEX idx_tickets_requester (requester_email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS threads (
+  thread_id VARCHAR(50) PRIMARY KEY, ticket_id VARCHAR(50) NOT NULL, sender_id VARCHAR(50) NOT NULL, sender_name VARCHAR(150) NOT NULL,
+  sender_role VARCHAR(50) NOT NULL, message LONGTEXT NOT NULL, visibility ENUM('public','internal') NOT NULL DEFAULT 'public',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_thread_ticket_date (ticket_id,created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS audit_logs (
+  log_id VARCHAR(50) PRIMARY KEY, ticket_id VARCHAR(50) NULL, actor_id VARCHAR(50) NULL, actor_name VARCHAR(150) NOT NULL, actor_role VARCHAR(50) NOT NULL,
+  action VARCHAR(100) NOT NULL, entity_type VARCHAR(50) NULL, entity_id VARCHAR(50) NULL, details TEXT NULL, description TEXT NULL,
+  ip_address VARCHAR(45) NULL, user_agent TEXT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_audit_actor_action_date (actor_id,action,created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS settings (
+  setting_key VARCHAR(100) PRIMARY KEY, setting_value TEXT NOT NULL, description VARCHAR(255) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS regions (
+        region_id VARCHAR(50) NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        code VARCHAR(20) NOT NULL,
+        description VARCHAR(255) DEFAULT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (region_id),
+        UNIQUE KEY uk_regions_code (code)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS offices (
+        office_id VARCHAR(50) NOT NULL,
+        region_id VARCHAR(50) NOT NULL,
+        name VARCHAR(150) NOT NULL,
+        code VARCHAR(20) NOT NULL,
+        type ENUM('PUSAT', 'KCU', 'KC', 'KCP') NOT NULL DEFAULT 'KC',
+        address TEXT DEFAULT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (office_id),
+        KEY idx_offices_region_id (region_id),
+        KEY idx_offices_code (code),
+        CONSTRAINT fk_offices_region FOREIGN KEY (region_id) REFERENCES regions (region_id) ON DELETE RESTRICT ON UPDATE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS roles (
+        role_code VARCHAR(50) NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        description VARCHAR(255) DEFAULT NULL,
+        default_scope ENUM('GLOBAL', 'REGIONAL', 'OFFICE', 'OWN') NOT NULL DEFAULT 'OFFICE',
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (role_code)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS permissions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        code VARCHAR(100) NOT NULL,
+        name VARCHAR(150) NOT NULL,
+        description VARCHAR(255) DEFAULT NULL,
+        module VARCHAR(50) NOT NULL,
+        action VARCHAR(50) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_permissions_code (code),
+        KEY idx_permissions_module (module)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS role_permissions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        role_code VARCHAR(50) NOT NULL,
+        permission_id INT NOT NULL,
+        effect ENUM('ALLOW', 'DENY') NOT NULL DEFAULT 'ALLOW',
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_role_perm (role_code, permission_id),
+        CONSTRAINT fk_rp_role FOREIGN KEY (role_code) REFERENCES roles (role_code) ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT fk_rp_perm FOREIGN KEY (permission_id) REFERENCES permissions (id) ON DELETE CASCADE ON UPDATE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS user_permissions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(50) NOT NULL,
+        permission_id INT NOT NULL,
+        effect ENUM('ALLOW', 'DENY') NOT NULL DEFAULT 'ALLOW',
+        granted_by VARCHAR(50) DEFAULT 'system',
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_user_perm (user_id, permission_id),
+        CONSTRAINT fk_up_perm FOREIGN KEY (permission_id) REFERENCES permissions (id) ON DELETE CASCADE ON UPDATE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS registration_approvals (
+        approval_id VARCHAR(50) NOT NULL PRIMARY KEY,
+        user_id VARCHAR(50) NOT NULL,
+        status ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+        reviewed_by VARCHAR(50) DEFAULT NULL,
+        reviewer_name VARCHAR(150) DEFAULT NULL,
+        rejection_reason TEXT DEFAULT NULL,
+        reviewed_at DATETIME DEFAULT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_reg_status (status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS mfa_challenges (
+        challenge_id VARCHAR(50) NOT NULL PRIMARY KEY,
+        challenge_token VARCHAR(255) NOT NULL,
+        user_id VARCHAR(50) NOT NULL,
+        expires_at DATETIME NOT NULL,
+        is_used TINYINT(1) NOT NULL DEFAULT 0,
+        attempts INT NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_challenge_token (challenge_token),
+        KEY idx_challenge_user (user_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS login_sessions (
+        session_id VARCHAR(50) NOT NULL PRIMARY KEY,
+        user_id VARCHAR(50) NOT NULL,
+        token_hash VARCHAR(255) NOT NULL,
+        ip_address VARCHAR(45) DEFAULT NULL,
+        user_agent TEXT DEFAULT NULL,
+        last_activity_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME NOT NULL,
+        is_revoked TINYINT(1) NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_sessions_user (user_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS ticket_reopen_requests (
+        request_id VARCHAR(50) NOT NULL PRIMARY KEY,
+        ticket_id VARCHAR(50) NOT NULL,
+        requester_id VARCHAR(50) NOT NULL,
+        requester_name VARCHAR(150) NOT NULL,
+        requester_email VARCHAR(150) NOT NULL,
+        reason TEXT NOT NULL,
+        status ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+        reviewed_by VARCHAR(50) DEFAULT NULL,
+        reviewer_name VARCHAR(150) DEFAULT NULL,
+        review_note TEXT DEFAULT NULL,
+        reviewed_at DATETIME DEFAULT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_reopen_ticket (ticket_id),
+        KEY idx_reopen_status (status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

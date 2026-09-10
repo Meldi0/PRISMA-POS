@@ -1,55 +1,40 @@
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { safeEqual } from './security.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'poso_jwt_default_secret_key_2026';
-const GLOBAL_SALT = 'POSO_SALT_DEFAULT';
-
+function secret() {
+  const value = process.env.JWT_SECRET;
+  if (!value || value.length < 32 || /change_in_production|default_secret|your_jwt/.test(value)) throw new Error('JWT_SECRET harus berupa secret acak minimal 32 karakter.');
+  return value;
+}
+export const hashPassword = (value) => bcrypt.hash(value, 12);
 export function hashPasswordLegacy(password, salt = 'poso') {
-  const combined = password + salt + GLOBAL_SALT;
-  const hash = crypto.createHash('sha256').update(combined, 'utf8').digest('hex');
-  return `${hash}:${salt}`;
+  return crypto.createHash('sha256').update(password + salt + 'POSO_SALT_DEFAULT').digest('hex') + ':' + salt;
 }
-
-export async function hashPassword(password) {
-  const salt = await bcrypt.genSalt(10);
-  return bcrypt.hash(password, salt);
-}
-
-export async function verifyPassword(inputPassword, storedHash) {
-  if (!storedHash || !inputPassword) return false;
-
-  // 1. Check if stored in bcrypt format ($2a$, $2b$, $2y$)
-  if (storedHash.startsWith('$2')) {
-    try {
-      const match = await bcrypt.compare(inputPassword, storedHash);
-      if (match) return true;
-    } catch (e) {}
-  }
-
-  // 2. Check if stored in legacy SHA-256 format (hash:salt)
-  if (storedHash.includes(':')) {
-    const [hash, salt] = storedHash.split(':');
-    const computed = crypto.createHash('sha256').update(inputPassword + salt + GLOBAL_SALT, 'utf8').digest('hex');
-    if (computed === hash) return true;
-  }
-
-  // 3. Fallback check plain text (for initial development or testing)
-  if (storedHash === inputPassword) {
-    return true;
-  }
-
+export async function verifyPassword(value, hash) {
+  if (typeof value !== 'string' || typeof hash !== 'string') return false;
+  if (/^\$2[aby]\$/.test(hash)) return bcrypt.compare(value, hash);
+  // Upgrade legacy hashes after login; plaintext is never accepted.
+  if (/^[a-f0-9]{64}:[^:]+$/.test(hash)) return safeEqual(hashPasswordLegacy(value, hash.split(':')[1]), hash);
   return false;
 }
-
-export function generateToken(payload) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+export function generateToken(payload, expiresIn = '8h') {
+  return jwt.sign(payload, secret(), { expiresIn, algorithm: 'HS256', issuer: 'prisma-pos', audience: 'prisma-pos-web' });
 }
-
 export function verifyToken(token) {
-  try {
-    return jwt.verify(token, JWT_SECRET);
-  } catch (err) {
-    return null;
-  }
+  try { return jwt.verify(token, secret(), { algorithms: ['HS256'], issuer: 'prisma-pos', audience: 'prisma-pos-web' }); }
+  catch { return null; }
+}
+export function encryptSecret(value) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', crypto.createHash('sha256').update(secret()).digest(), iv);
+  const data = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  return [iv, cipher.getAuthTag(), data].map(v => v.toString('base64')).join('.');
+}
+export function decryptSecret(value) {
+  const [iv, tag, data] = value.split('.').map(v => Buffer.from(v, 'base64'));
+  const decipher = crypto.createDecipheriv('aes-256-gcm', crypto.createHash('sha256').update(secret()).digest(), iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
 }

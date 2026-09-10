@@ -28,7 +28,7 @@ interface AuthContextType {
   isLoading: boolean;
   hasPermission: (permissionCode: string) => boolean;
   hasAnyPermission: (permissionCodes: string[]) => boolean;
-  login: (email: string, password: string) => Promise<{ 
+  login: (email: string, password: string, remember?: boolean) => Promise<{ 
     success: boolean; 
     message?: string; 
     role?: UserRole;
@@ -36,6 +36,7 @@ interface AuthContextType {
     challenge_token?: string;
     masked_email?: string;
     smtp_configured?: boolean;
+    mfa_method?: 'email' | 'totp';
     otp_preview?: string;
     account_status?: AccountStatus;
   }>;
@@ -98,6 +99,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     initAuth();
+    const expired = () => { setUser(null); setToken(null); };
+    window.addEventListener('poso_session_expired', expired);
+    return () => window.removeEventListener('poso_session_expired', expired);
   }, [initAuth]);
 
   const refreshUser = useCallback(async () => {
@@ -130,10 +134,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return permissionCodes.some(code => hasPermission(code));
   }, [user, hasPermission]);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, remember = false) => {
     setIsLoading(true);
     try {
-      const res = await apiService.login({ email, password });
+      const res = await apiService.login({ email, password, remember_me: remember });
       
       // Case 1: MFA is required
       if (res.mfa_required && res.challenge_token) {
@@ -144,6 +148,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           challenge_token: res.challenge_token,
           masked_email: res.masked_email,
           smtp_configured: res.smtp_configured,
+          mfa_method: res.mfa_method,
           otp_preview: res.otp_preview,
           message: res.message || 'Verifikasi Multi-Factor Authentication (MFA) diperlukan.'
         };
@@ -264,6 +269,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
+    void apiService.logout();
     apiService.setStoredUser(null);
     setUser(null);
     setToken(null);

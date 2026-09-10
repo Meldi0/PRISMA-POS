@@ -1,671 +1,219 @@
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import { pool } from '../config/db.js';
-import { hashPassword, verifyPassword, generateToken } from '../utils/auth.js';
-import { generateTotpSecret, generateTotpUri, verifyTotp, generateBackupCodes } from '../utils/totp.js';
+import { hashPassword, verifyPassword, generateToken, encryptSecret, decryptSecret } from '../utils/auth.js';
+import { generateTotpSecret, generateTotpUri, generateTotpCode, generateBackupCodes } from '../utils/totp.js';
 import { resolveUserPermissions } from '../utils/permissions.js';
 import { sendOtpEmail, isSmtpReady } from '../utils/email.js';
+import { normalizeRole, isActive } from '../utils/access.js';
+import { HttpError, id, digest, otp, safeEqual, text, email, password, transaction, audit, endpoint, safeUser } from '../utils/security.js';
+import { validateOrganization } from './userController.js';
 
-function maskEmail(email) {
-  if (!email || !email.includes('@')) return email;
-  const [local, domain] = email.split('@');
-  if (local.length <= 2) return `${local[0]}***@${domain}`;
-  return `${local[0]}***${local[local.length - 1]}@${domain}`;
+const profileSql = `SELECT u.*, r.name AS region_name, r.code AS region_code, COALESCE(o.name, u.office_id) AS office_name, o.code AS office_code, o.code AS nopen_kc
+  FROM users u LEFT JOIN regions r ON u.region_id = r.region_id LEFT JOIN offices o ON u.office_id = o.office_id WHERE u.user_id = ? LIMIT 1`;
+const maskEmail = (value) => value.replace(/^(.)(.*)(@.*)$/, '$1***$3');
+const codeHash = (token, code) => crypto.createHmac('sha256', process.env.JWT_SECRET).update(token + ':' + code).digest('hex');
+
+async function profile(db, userId) {
+  const [[user]] = await db.query(profileSql, [userId]);
+  if (!user || !isActive(user)) throw new HttpError(403, 'Akun tidak aktif. Hubungi administrator.');
+  const permissions = await resolveUserPermissions(userId, user.role);
+  return { ...safeUser(user), role: normalizeRole(user.role), mfa_enabled: Boolean(user.totp_secret), permissions: permissions.allowedCodes };
+}
+async function deliver(user, code) {
+  if (!isSmtpReady()) throw new HttpError(503, 'Pengiriman kode verifikasi belum tersedia. Hubungi administrator untuk konfigurasi email.');
+  const sent = await sendOtpEmail({ toEmail: user.email, recipientName: user.name, otpCode: code });
+  if (!sent.success) throw new HttpError(503, 'Kode verifikasi belum berhasil dikirim. Coba lagi nanti atau hubungi administrator.');
 }
 
-export async function login(req, res) {
-  try {
-    const { email, password } = req.body;
-    const cleanEmail = (email || '').toLowerCase().trim();
+export const login = endpoint(async (req, res) => {
+  const address = email(req.body.email);
+  const value = text(req.body.password, 'Kata sandi', { max: 200 });
+  const [[user]] = await pool.query('SELECT * FROM users WHERE email = ? LIMIT 1', [address]);
+  // Do equivalent hashing work for unknown users to limit account enumeration.
+  if (!user) { await hashPassword(value); throw new HttpError(401, 'Email atau kata sandi tidak valid.'); }
+  if (user.locked_until && new Date(user.locked_until) > new Date()) throw new HttpError(429, 'Terlalu banyak percobaan. Coba kembali dalam 15 menit.');
+  if (!await verifyPassword(value, user.password_hash)) {
+    await pool.query(`UPDATE users SET failed_attempts = failed_attempts + 1, locked_until = IF(failed_attempts >= 5, DATE_ADD(NOW(), INTERVAL 15 MINUTE), locked_until) WHERE user_id = ?`, [user.user_id]);
+    throw new HttpError(401, 'Email atau kata sandi tidak valid.');
+  }
+  if (!isActive(user)) throw new HttpError(403, user.account_status === 'PENDING' ? 'Pendaftaran Anda sedang ditinjau administrator. Silakan tunggu persetujuan.' : 'Akun Anda tidak aktif. Hubungi administrator.');
+  if (!user.password_hash.startsWith('$2')) await pool.query('UPDATE users SET password_hash = ? WHERE user_id = ?', [await hashPassword(value), user.user_id]);
 
-    if (!cleanEmail || !password) {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Email dan kata sandi wajib diisi.'
-      });
-    }
-
-    const [rows] = await pool.query(
-      `SELECT 
-        user_id, name, email, password_hash, role, is_active,
-        account_status, region_id, office_id, data_scope, position, mfa_enabled,
-        failed_attempts, locked_until, nip, department, role_title
-      FROM users 
-      WHERE LOWER(email) = ? LIMIT 1`,
-      [cleanEmail]
+  // Check Trusted Device (7-day OTP bypass)
+  const rawDeviceToken = req.body.device_token;
+  if (typeof rawDeviceToken === 'string' && rawDeviceToken.length === 64) {
+    const [[device]] = await pool.query(
+      'SELECT device_id FROM trusted_devices WHERE user_id = ? AND device_token_hash = ? AND expires_at > NOW() LIMIT 1',
+      [user.user_id, digest(rawDeviceToken)]
     );
-
-    if (rows.length === 0) {
-      return res.status(401).json({
-        status: 'error',
-        code: 401,
-        message: 'Kombinasi email atau kata sandi tidak valid.'
-      });
-    }
-
-    const user = rows[0];
-
-    // 1. Check Lockout
-    if (user.locked_until && new Date(user.locked_until) > new Date()) {
-      const remainingMinutes = Math.ceil((new Date(user.locked_until).getTime() - Date.now()) / 60000);
-      return res.status(403).json({
-        status: 'error',
-        code: 403,
-        message: `Akun terkunci sementara karena percobaan gagal berulang. Silakan coba lagi dalam ${remainingMinutes} menit.`
-      });
-    }
-
-    // 2. Check Account Status (PENDING, REJECTED, SUSPENDED, INACTIVE)
-    const status = user.account_status || (user.is_active ? 'ACTIVE' : 'INACTIVE');
-
-    if (status === 'PENDING') {
-      return res.status(403).json({
-        status: 'error',
-        code: 403,
-        account_status: 'PENDING',
-        message: 'Akun Anda sedang dalam antrean verifikasi Admin Pusat (Status: PENDING). Harap menunggu persetujuan.'
-      });
-    }
-
-    if (status === 'REJECTED') {
-      // Ambil alasan penolakan dari registration_approvals
-      const [appRows] = await pool.query(
-        'SELECT rejection_reason, reviewed_at FROM registration_approvals WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
-        [user.user_id]
+    if (device) {
+      const sessionId = id('SES');
+      const hours = 168; // 7 days
+      const authToken = generateToken({ user_id: user.user_id, sid: sessionId }, hours + 'h');
+      await pool.query(
+        `INSERT INTO login_sessions (session_id, user_id, token_hash, ip_address, user_agent, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [sessionId, user.user_id, digest(authToken), req.ip?.slice(0,45) || null, (req.headers['user-agent'] || '').slice(0,1000), new Date(Date.now() + hours * 3600000)]
       );
-      const reason = appRows[0]?.rejection_reason || 'Data pendaftaran tidak memenuhi kriteria kedinasan.';
-      return res.status(403).json({
-        status: 'error',
-        code: 403,
-        account_status: 'REJECTED',
-        message: `Pendaftaran akun Anda ditolak oleh Admin Pusat. Alasan: "${reason}"`
-      });
-    }
-
-    if (status === 'SUSPENDED') {
-      return res.status(403).json({
-        status: 'error',
-        code: 403,
-        account_status: 'SUSPENDED',
-        message: 'Akun Anda telah dibekukan (SUSPENDED) oleh Administrator Pusat. Akses ke sistem ditutup.'
-      });
-    }
-
-    if (status === 'INACTIVE' || !user.is_active) {
-      return res.status(403).json({
-        status: 'error',
-        code: 403,
-        account_status: 'INACTIVE',
-        message: 'Akun Anda sedang dinonaktifkan. Silakan hubungi Administrator Pusat.'
-      });
-    }
-
-    // 3. Verify Password
-    const isMatch = await verifyPassword(password, user.password_hash);
-    if (!isMatch) {
-      const newFailed = (user.failed_attempts || 0) + 1;
-      let lockUpdate = '';
-      const params = [newFailed, user.user_id];
-
-      if (newFailed >= 5) {
-        lockUpdate = ', locked_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE)';
-      }
-
-      await pool.query(`UPDATE users SET failed_attempts = ?${lockUpdate} WHERE user_id = ?`, params);
-
-      // Audit Log Gagal Login
-      try {
-        await pool.query(`
-          INSERT INTO audit_logs (log_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description, ip_address)
-          VALUES (?, ?, ?, ?, 'LOGIN_FAILED', 'USER', ?, 'Kata sandi salah', 'Percobaan masuk gagal', ?)
-        `, [
-          `LOG-${Date.now().toString().slice(-6)}`, user.user_id, user.name, user.role, user.user_id, req.ip
-        ]);
-      } catch (e) {}
-
-      return res.status(401).json({
-        status: 'error',
-        code: 401,
-        message: newFailed >= 5 
-          ? 'Terlalu banyak percobaan gagal. Akun dikunci selama 15 menit.' 
-          : 'Kombinasi email atau kata sandi tidak valid.'
-      });
-    }
-
-    // Reset failed attempts & clear lockout
-    await pool.query('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE user_id = ?', [user.user_id]);
-
-    // Generate MFA Challenge for Multi-Factor Authentication (MFA Login for all accounts)
-    const challengeToken = crypto.randomBytes(32).toString('hex');
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 menit masa berlaku
-    const challengeId = `CHAL-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    await pool.query(
-      `INSERT INTO mfa_challenges (challenge_id, challenge_token, user_id, otp_code, expires_at, is_used, attempts)
-       VALUES (?, ?, ?, ?, ?, 0, 0)`,
-      [challengeId, challengeToken, user.user_id, otpCode, expiresAt]
-    );
-
-    // Send OTP email (gracefully handled if SMTP is unconfigured)
-    try {
-      await sendOtpEmail({
-        toEmail: user.email,
-        recipientName: user.name,
-        otpCode: otpCode
-      });
-    } catch (mailErr) {
-      console.warn('Notice: Failed to send OTP email (SMTP might be unconfigured):', mailErr.message);
-    }
-
-    // Audit Log Tantangan MFA
-    try {
-      await pool.query(`
-        INSERT INTO audit_logs (log_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description, ip_address)
-        VALUES (?, ?, ?, ?, 'MFA_CHALLENGE', 'SECURITY', ?, 'Challenge OTP dibuat untuk verifikasi login', 'Permintaan MFA 2FA Login', ?)
-      `, [`LOG-${Date.now().toString().slice(-6)}`, user.user_id, user.name, user.role, user.user_id, req.ip]);
-    } catch (e) {}
-
-    const masked = maskEmail(user.email);
-
-    return res.status(200).json({
-      status: 'success',
-      code: 200,
-      mfa_required: true,
-      challenge_token: challengeToken,
-      masked_email: masked,
-      smtp_configured: isSmtpReady(),
-      message: isSmtpReady()
-        ? `Kredensial akun valid. Kode OTP 6-digit telah dikirimkan ke email ${masked}. Silakan masukkan kode untuk menyelesaikan autentikasi dinas.`
-        : `Kredensial akun valid. Layanan email SMTP belum dikonfigurasi. Silakan gunakan kode darurat untuk masuk.`
-    });
-
-  } catch (err) {
-    console.error('Error in login:', err);
-    return res.status(500).json({
-      status: 'error',
-      code: 500,
-      message: 'Terjadi kesalahan sistem saat proses masuk.'
-    });
-  }
-}
-
-/**
- * Verify MFA Challenge Token
- */
-export async function verifyMfa(req, res) {
-  try {
-    const { challenge_token, otp_code } = req.body;
-
-    if (!challenge_token || !otp_code) {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Challenge token dan kode OTP 6-digit wajib dikirim.'
-      });
-    }
-
-    const [chalRows] = await pool.query(
-      'SELECT * FROM mfa_challenges WHERE challenge_token = ? AND is_used = 0 LIMIT 1',
-      [challenge_token]
-    );
-
-    if (chalRows.length === 0) {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Sesi verifikasi MFA tidak valid atau telah digunakan. Silakan login kembali.'
-      });
-    }
-
-    const challenge = chalRows[0];
-
-    if (new Date(challenge.expires_at) < new Date()) {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Sesi verifikasi MFA telah kadaluarsa. Silakan login kembali.'
-      });
-    }
-
-    if (challenge.attempts >= 5) {
-      return res.status(403).json({
-        status: 'error',
-        code: 403,
-        message: 'Terlalu banyak percobaan kode OTP salah. Sesi dibatalkan.'
-      });
-    }
-
-    const cleanCode = otp_code.trim().replace(/\s+/g, '');
-    let isValid = false;
-
-    // 1. Cek kecocokan OTP challenge dari sesi login
-    if (challenge.otp_code && cleanCode === challenge.otp_code) {
-      isValid = true;
-    } else if (cleanCode === '123456') {
-      // Fallback kode OTP darurat kedinasan / testing
-      isValid = true;
-    }
-
-    if (!isValid) {
-      await pool.query('UPDATE mfa_challenges SET attempts = attempts + 1 WHERE challenge_id = ?', [challenge.challenge_id]);
-
-      try {
-        await pool.query(`
-          INSERT INTO audit_logs (log_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description, ip_address)
-          VALUES (?, ?, 'User MFA', 'USER', 'MFA_FAILED', 'SECURITY', ?, 'Kode OTP salah', 'Percobaan verifikasi MFA gagal', ?)
-        `, [`LOG-${Date.now().toString().slice(-6)}`, challenge.user_id, challenge.user_id, req.ip]);
-      } catch (e) {}
-
-      return res.status(401).json({
-        status: 'error',
-        code: 401,
-        message: 'Kode OTP tidak valid atau salah. Periksa kembali 6 digit kode yang dikirimkan.'
-      });
-    }
-
-    // Mark challenge used
-    await pool.query('UPDATE mfa_challenges SET is_used = 1 WHERE challenge_id = ?', [challenge.challenge_id]);
-
-    // Fetch full user record with Region and Office details
-    const [userRows] = await pool.query(
-      `SELECT 
-        u.user_id, u.name, u.email, u.role, u.is_active, u.account_status,
-        u.region_id, u.office_id, u.data_scope, u.position, u.mfa_enabled,
-        u.nip, u.department, u.role_title,
-        r.name AS regional_name, r.code AS regional_code,
-        o.name AS office_name, o.code AS office_code
-      FROM users u
-      LEFT JOIN regions r ON u.region_id = r.region_id
-      LEFT JOIN offices o ON u.office_id = o.office_id
-      WHERE u.user_id = ? LIMIT 1`,
-      [challenge.user_id]
-    );
-
-    const user = userRows[0];
-    const permResolution = await resolveUserPermissions(user.user_id, user.role);
-
-    const userPayload = {
-      user_id: user.user_id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      account_status: user.account_status || 'ACTIVE',
-      data_scope: user.data_scope,
-      region_id: user.region_id,
-      office_id: user.office_id,
-      region_name: user.regional_name,
-      region_code: user.regional_code,
-      office_name: user.office_name,
-      office_code: user.office_code,
-      nopen_kc: user.office_code,
-      position: user.position,
-      nip: user.nip,
-      phone_number: null,
-      mfa_enabled: true,
-      permissions: permResolution.allowedCodes
-    };
-
-    const token = generateToken(userPayload);
-
-    // Audit Log Sukses MFA
-    try {
-      await pool.query(`
-        INSERT INTO audit_logs (log_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description, ip_address)
-        VALUES (?, ?, ?, ?, 'MFA_SUCCESS', 'SESSION', ?, 'Verifikasi MFA sukses', 'Login MFA dua faktor berhasil diverifikasi', ?)
-      `, [`LOG-${Date.now().toString().slice(-6)}`, user.user_id, user.name, user.role, user.user_id, req.ip]);
-    } catch (e) {}
-
-    return res.status(200).json({
-      status: 'success',
-      code: 200,
-      message: 'Autentikasi dua faktor berhasil diverifikasi.',
-      data: {
-        token,
-        user: userPayload
-      }
-    });
-
-  } catch (err) {
-    console.error('Error in verifyMfa:', err);
-    return res.status(500).json({
-      status: 'error',
-      code: 500,
-      message: 'Gagal memproses verifikasi MFA.'
-    });
-  }
-}
-
-/**
- * Setup MFA TOTP for Authenticated User
- */
-export async function setupMfa(req, res) {
-  try {
-    const user = req.user;
-    if (!user) {
-      return res.status(401).json({ status: 'error', code: 401, message: 'Autentikasi diperlukan.' });
-    }
-
-    const secret = generateTotpSecret();
-    const uri = generateTotpUri('POSO Helpdesk', user.email, secret);
-    const backupCodes = generateBackupCodes(8);
-
-    return res.status(200).json({
-      status: 'success',
-      data: {
-        secret,
-        qr_uri: uri,
-        backup_codes: backupCodes
-      }
-    });
-  } catch (err) {
-    console.error('Error in setupMfa:', err);
-    return res.status(500).json({ status: 'error', code: 500, message: 'Gagal menginisialisasi MFA.' });
-  }
-}
-
-/**
- * Confirm and Activate MFA
- */
-export async function confirmMfa(req, res) {
-  try {
-    const user = req.user;
-    const { code } = req.body;
-
-    if (!code) {
-      return res.status(400).json({ status: 'error', code: 400, message: 'Kode OTP wajib dimasukkan.' });
-    }
-
-    await pool.query('UPDATE users SET mfa_enabled = 1 WHERE user_id = ?', [user.user_id]);
-
-    try {
-      await pool.query(`
-        INSERT INTO audit_logs (log_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
-        VALUES (?, ?, ?, ?, 'MFA_ENABLE', 'USER', ?, 'MFA berhasil diaktifkan', 'Pengguna mengaktifkan autentikasi dua faktor')
-      `, [`LOG-${Date.now().toString().slice(-6)}`, user.user_id, user.name, user.role, user.user_id]);
-    } catch (e) {}
-
-    return res.status(200).json({
-      status: 'success',
-      message: 'MFA Authenticator berhasil diaktifkan untuk akun Anda.'
-    });
-  } catch (err) {
-    console.error('Error in confirmMfa:', err);
-    return res.status(500).json({ status: 'error', code: 500, message: 'Gagal mengonfirmasi MFA.' });
-  }
-}
-
-/**
- * Register New Staff Account (Status = PENDING)
- */
-export async function register(req, res) {
-  try {
-    const {
-      name,
-      email,
-      phone,
-      position,
-      nip,
-      nopen,
-      office_name,
-      kc_name,
-      user_type = 'CABANG', // REGIONAL | CABANG
-      region_id = 'REG-03',
-      office_id,
-      password
-    } = req.body;
-
-    const cleanName = (name || '').trim();
-    const cleanEmail = (email || '').toLowerCase().trim();
-
-    if (!cleanName || !cleanEmail || !password) {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Nama lengkap, email, dan kata sandi wajib diisi.'
-      });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Kata sandi minimal 6 karakter.'
-      });
-    }
-
-    // Check email uniqueness
-    const [existing] = await pool.query(
-      'SELECT user_id FROM users WHERE LOWER(email) = ? LIMIT 1',
-      [cleanEmail]
-    );
-
-    if (existing.length > 0) {
-      return res.status(409).json({
-        status: 'error',
-        code: 409,
-        message: 'Email sudah terdaftar. Silakan gunakan menu masuk (Sign In).'
-      });
-    }
-
-    // Normalize region_id
-    let cleanRegionId = region_id || 'REG-03';
-    if (cleanRegionId === 'REG1') cleanRegionId = 'REG-01';
-    else if (cleanRegionId === 'REG2') cleanRegionId = 'REG-02';
-    else if (cleanRegionId === 'REG3') cleanRegionId = 'REG-03';
-    else if (cleanRegionId === 'REG4') cleanRegionId = 'REG-04';
-    else if (cleanRegionId === 'REG5') cleanRegionId = 'REG-05';
-    else if (cleanRegionId === 'REG6') cleanRegionId = 'REG-06';
-    else if (cleanRegionId === 'PUSAT') cleanRegionId = 'REG-PUSAT';
-
-    // Automatic Office Record Resolution from Manual Input
-    // Pengguna mengetik nama KC & nopen secara manual agar tidak perlu input database master manual
-    const cleanOfficeName = (office_name || kc_name || '').trim();
-    const cleanNopen = (nopen || '').trim();
-    let targetOfficeId = office_id || null;
-
-    if (cleanOfficeName || cleanNopen) {
-      let existingOffice = null;
-      // 1. Check existing office by Nopen code
-      if (cleanNopen) {
-        const [rowsByCode] = await pool.query(
-          'SELECT office_id, name, code, region_id FROM offices WHERE code = ? LIMIT 1',
-          [cleanNopen]
-        );
-        if (rowsByCode.length > 0) existingOffice = rowsByCode[0];
-      }
-      // 2. Check existing office by Name
-      if (!existingOffice && cleanOfficeName) {
-        const [rowsByName] = await pool.query(
-          'SELECT office_id, name, code, region_id FROM offices WHERE LOWER(name) = LOWER(?) LIMIT 1',
-          [cleanOfficeName]
-        );
-        if (rowsByName.length > 0) existingOffice = rowsByName[0];
-      }
-
-      if (existingOffice) {
-        targetOfficeId = existingOffice.office_id;
-      } else {
-        // Otomatis buat entri office baru di database sehingga langsung terekap
-        const slug = cleanNopen ? cleanNopen.replace(/[^a-zA-Z0-9]/g, '') : Math.random().toString(36).substring(2, 7).toUpperCase();
-        let newOfficeId = `OFC-${slug}`;
-        const [chk] = await pool.query('SELECT office_id FROM offices WHERE office_id = ? LIMIT 1', [newOfficeId]);
-        if (chk.length > 0) {
-          newOfficeId = `${newOfficeId}-${Date.now().toString().slice(-4)}`;
+      await pool.query(
+        'UPDATE trusted_devices SET expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY), ip_address = ?, user_agent = ? WHERE device_id = ?',
+        [req.ip?.slice(0,45) || null, (req.headers['user-agent'] || '').slice(0,1000), device.device_id]
+      );
+      await pool.query('UPDATE users SET failed_attempts = 0, locked_until = NULL, last_login_at = NOW() WHERE user_id = ?', [user.user_id]);
+      await audit(pool, user, 'TRUSTED_DEVICE_LOGIN', user.user_id, 'Masuk langsung via perangkat tepercaya');
+      return res.json({
+        status: 'success',
+        mfa_required: false,
+        data: {
+          token: authToken,
+          device_token: rawDeviceToken,
+          user: await profile(pool, user.user_id)
         }
-
-        const finalOfficeName = cleanOfficeName || `Kantor Pos ${cleanNopen}`;
-        const finalNopen = cleanNopen || '00000';
-
-        await pool.query(`
-          INSERT INTO offices (office_id, region_id, name, code, type, created_at)
-          VALUES (?, ?, ?, ?, 'KC', NOW())
-        `, [newOfficeId, cleanRegionId, finalOfficeName, finalNopen]);
-
-        targetOfficeId = newOfficeId;
-      }
-    }
-
-    const userId = `USR-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-    const hashedPassword = await hashPassword(password);
-
-    // Seluruh pendaftaran dinas staf UPT adalah role PELAPOR dengan status PENDING
-    const role = 'PELAPOR';
-    const dataScope = 'OFFICE';
-    const accountStatus = 'PENDING';
-
-    await pool.query(`
-      INSERT INTO users (
-        user_id, name, email, password_hash, password_plain, role, is_active,
-        account_status, region_id, office_id, data_scope, position,
-        nip, mfa_enabled, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 1, 'self_registration')
-    `, [
-      userId, cleanName, cleanEmail, hashedPassword, password, role,
-      accountStatus, cleanRegionId, targetOfficeId, dataScope, position || 'Staf Operasional',
-      (nip || '').trim() || cleanNopen || null
-    ]);
-
-    // Insert approval entry
-    const approvalId = `APV-${Date.now().toString().slice(-6)}`;
-    await pool.query(`
-      INSERT INTO registration_approvals (approval_id, user_id, status, created_at)
-      VALUES (?, ?, 'PENDING', NOW())
-    `, [approvalId, userId]);
-
-    // Audit Log Pendaftaran
-    try {
-      await pool.query(`
-        INSERT INTO audit_logs (log_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description, ip_address)
-        VALUES (?, ?, ?, ?, 'REGISTER', 'USER', ?, 'Pendaftaran akun baru (PENDING)', 'Pendaftaran mandiri pengguna dinas baru', ?)
-      `, [
-        `LOG-${Date.now().toString().slice(-6)}`, userId, cleanName, role, userId, req.ip
-      ]);
-    } catch (e) {}
-
-    return res.status(201).json({
-      status: 'success',
-      code: 201,
-      account_status: 'PENDING',
-      message: 'Pendaftaran akun berhasil diserahkan. Akun Anda berstatus PENDING dan sedang menunggu persetujuan dari Administrator Pusat sebelum dapat digunakan.',
-      data: {
-        user_id: userId,
-        name: cleanName,
-        email: cleanEmail,
-        role,
-        account_status: 'PENDING'
-      }
-    });
-  } catch (err) {
-    console.error('Error in register:', err);
-    return res.status(500).json({
-      status: 'error',
-      code: 500,
-      message: 'Terjadi kesalahan sistem saat mendaftarkan akun.'
-    });
-  }
-}
-
-export async function getProfile(req, res) {
-  if (!req.user) {
-    return res.status(401).json({ status: 'error', code: 401, message: 'Belum login.' });
-  }
-
-  try {
-    const [rows] = await pool.query(
-      `SELECT 
-        u.user_id, u.name, u.email, u.role, u.is_active, u.account_status,
-        u.region_id, u.office_id, u.data_scope, u.position, u.mfa_enabled,
-        u.nip, u.department, u.role_title,
-        r.name AS regional_name, r.code AS region_code,
-        o.name AS office_name, o.code AS office_code, o.code AS nopen_kc
-      FROM users u
-      LEFT JOIN regions r ON u.region_id = r.region_id
-      LEFT JOIN offices o ON u.office_id = o.office_id
-      WHERE u.user_id = ? LIMIT 1`,
-      [req.user.user_id]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ status: 'error', code: 404, message: 'User tidak ditemukan.' });
-    }
-
-    const userData = rows[0];
-    const permResolution = await resolveUserPermissions(userData.user_id, userData.role);
-
-    return res.status(200).json({
-      status: 'success',
-      data: {
-        ...userData,
-        permissions: permResolution.permissions,
-        allowedPermissions: permResolution.allowedCodes
-      }
-    });
-  } catch (err) {
-    console.error('Error in getProfile:', err);
-    return res.status(500).json({ status: 'error', code: 500, message: 'Gagal mengambil profil.' });
-  }
-}
-
-/**
- * Resend MFA OTP to user email
- */
-export async function resendMfaOtp(req, res) {
-  try {
-    const { challenge_token } = req.body;
-    if (!challenge_token) {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Token challenge verifikasi diperlukan.'
       });
     }
-
-    const [rows] = await pool.query(
-      `SELECT c.challenge_id, c.user_id, u.name, u.email 
-       FROM mfa_challenges c
-       JOIN users u ON c.user_id = u.user_id
-       WHERE c.challenge_token = ? AND c.is_used = 0 LIMIT 1`,
-      [challenge_token]
-    );
-
-    if (rows.length === 0) {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Sesi verifikasi OTP tidak ditemukan atau telah kedaluwarsa. Silakan masuk kembali.'
-      });
-    }
-
-    const challenge = rows[0];
-    const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
-    const newExpiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-    await pool.query(
-      `UPDATE mfa_challenges SET otp_code = ?, expires_at = ?, attempts = 0 WHERE challenge_id = ?`,
-      [newOtp, newExpiresAt, challenge.challenge_id]
-    );
-
-    await sendOtpEmail({
-      toEmail: challenge.email,
-      recipientName: challenge.name,
-      otpCode: newOtp
-    });
-
-    const masked = maskEmail(challenge.email);
-
-    return res.status(200).json({
-      status: 'success',
-      code: 200,
-      masked_email: masked,
-      message: `Kode OTP baru berhasil dikirim ke email ${masked}. Harap periksa folder Inbox atau Spam.`
-    });
-  } catch (err) {
-    console.error('Error in resendMfaOtp:', err);
-    return res.status(500).json({
-      status: 'error',
-      code: 500,
-      message: 'Gagal mengirim ulang kode OTP.'
-    });
   }
-}
+
+  const token = crypto.randomBytes(32).toString('hex');
+  const code = otp();
+  if (!user.totp_secret) await deliver(user, code);
+  await transaction(pool, async db => {
+    await db.query('UPDATE mfa_challenges SET is_used = 1 WHERE user_id = ? AND is_used = 0', [user.user_id]);
+    await db.query(`INSERT INTO mfa_challenges (challenge_id, challenge_token, user_id, otp_hash, expires_at, remember_me, method, purpose, last_sent_at)
+      VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE), ?, ?, 'login', NOW())`,
+    [id('CHAL'), digest(token), user.user_id, user.totp_secret ? null : codeHash(token, code), req.body.remember_me === true ? 1 : 0, user.totp_secret ? 'totp' : 'email']);
+    await db.query('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE user_id = ?', [user.user_id]);
+    await audit(db, user, 'MFA_CHALLENGE', user.user_id, 'Verifikasi masuk diminta');
+  });
+  res.json({ status: 'success', mfa_required: true, challenge_token: token, masked_email: maskEmail(user.email), smtp_configured: true,
+    mfa_method: user.totp_secret ? 'totp' : 'email', message: user.totp_secret ? 'Masukkan kode dari aplikasi authenticator atau kode pemulihan.' : 'Kode verifikasi dikirim ke email Anda.' });
+});
+
+export const verifyMfa = endpoint(async (req, res) => {
+  const token = text(req.body.challenge_token, 'Sesi verifikasi', { min: 64, max: 64 });
+  const code = text(req.body.otp_code, 'Kode verifikasi', { min: 6, max: 20 }).replace(/\s/g, '');
+  const outcome = await transaction(pool, async db => {
+    const [[challenge]] = await db.query("SELECT * FROM mfa_challenges WHERE challenge_token = ? AND purpose = 'login' FOR UPDATE", [digest(token)]);
+    if (!challenge || challenge.is_used || new Date(challenge.expires_at) <= new Date() || challenge.attempts >= 5) return { failure: 'Sesi verifikasi telah berakhir. Silakan masuk kembali.' };
+    const [[user]] = await db.query('SELECT * FROM users WHERE user_id = ? FOR UPDATE', [challenge.user_id]);
+    if (!isActive(user)) return { failure: 'Akun tidak aktif.' };
+    let valid = false;
+    if (challenge.method === 'totp' && user.totp_secret) {
+      const step = Math.floor(Date.now() / 30000);
+      for (let offset = -1; offset <= 1; offset++) {
+        const candidate = step + offset;
+        if (candidate > (user.totp_last_step || 0) && safeEqual(generateTotpCode(decryptSecret(user.totp_secret), candidate), code)) {
+          await db.query('UPDATE users SET totp_last_step = ? WHERE user_id = ?', [candidate, user.user_id]);
+          valid = true; break;
+        }
+      }
+      if (!valid) {
+        const backups = typeof user.mfa_backup_codes === 'string' ? JSON.parse(user.mfa_backup_codes || '[]') : (user.mfa_backup_codes || []);
+        const index = backups.indexOf(digest(code.toUpperCase()));
+        if (index >= 0) {
+          backups.splice(index, 1);
+          await db.query('UPDATE users SET mfa_backup_codes = ? WHERE user_id = ?', [JSON.stringify(backups), user.user_id]);
+          valid = true;
+        }
+      }
+    } else valid = safeEqual(challenge.otp_hash, codeHash(token, code));
+    if (!valid) {
+      await db.query('UPDATE mfa_challenges SET attempts = attempts + 1 WHERE challenge_id = ?', [challenge.challenge_id]);
+      return { failure: 'Kode verifikasi salah. Periksa kode terbaru yang Anda terima.' };
+    }
+    await db.query('UPDATE mfa_challenges SET is_used = 1 WHERE challenge_id = ?', [challenge.challenge_id]);
+    const sessionId = id('SES');
+    const hours = challenge.remember_me ? 168 : 8;
+    const authToken = generateToken({ user_id: user.user_id, sid: sessionId }, hours + 'h');
+    await db.query(`INSERT INTO login_sessions (session_id, user_id, token_hash, ip_address, user_agent, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?)`, [sessionId, user.user_id, digest(authToken), req.ip?.slice(0,45) || null, (req.headers['user-agent'] || '').slice(0,1000), new Date(Date.now() + hours * 3600000)]);
+    let deviceToken = null;
+    if (challenge.remember_me) {
+      deviceToken = crypto.randomBytes(32).toString('hex');
+      await db.query(
+        `INSERT INTO trusted_devices (device_id, user_id, device_token_hash, device_name, ip_address, user_agent, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))`,
+        [id('DEV'), user.user_id, digest(deviceToken), (req.headers['user-agent'] || 'Browser').slice(0, 250), req.ip?.slice(0, 45) || null, (req.headers['user-agent'] || '').slice(0, 1000)]
+      );
+    }
+    await db.query('UPDATE users SET last_login_at = NOW() WHERE user_id = ?', [user.user_id]);
+    await audit(db, user, 'MFA_SUCCESS', user.user_id, 'Masuk dengan verifikasi dua langkah');
+    return { token: authToken, userId: user.user_id, deviceToken };
+  });
+  if (outcome.failure) throw new HttpError(401, outcome.failure);
+  res.json({ status: 'success', data: { token: outcome.token, device_token: outcome.deviceToken, user: await profile(pool, outcome.userId) } });
+});
+
+export const resendMfaOtp = endpoint(async (req, res) => {
+  const token = text(req.body.challenge_token, 'Sesi verifikasi', { min: 64, max: 64 });
+  await transaction(pool, async db => {
+    const [[c]] = await db.query('SELECT * FROM mfa_challenges WHERE challenge_token = ? FOR UPDATE', [digest(token)]);
+    if (!c || c.is_used || c.attempts >= 5 || c.method !== 'email' || new Date(c.expires_at) <= new Date()) throw new HttpError(400, 'Sesi verifikasi telah berakhir. Silakan mulai kembali.');
+    if (Date.now() - new Date(c.last_sent_at).getTime() < 60000 || c.resend_count >= 3) throw new HttpError(429, 'Tunggu 60 detik. Maksimal 3 kali kirim ulang per sesi.');
+    const [[user]] = await db.query('SELECT * FROM users WHERE user_id = ?', [c.user_id]);
+    if (!isActive(user)) throw new HttpError(403, 'Akun tidak aktif.');
+    const code = otp();
+    await deliver(user, code);
+    // Keep the original expiry and attempts: resend cannot extend or reset a challenge.
+    await db.query('UPDATE mfa_challenges SET otp_hash = ?, last_sent_at = NOW(), resend_count = resend_count + 1 WHERE challenge_id = ?', [codeHash(token, code), c.challenge_id]);
+  });
+  res.json({ status: 'success', message: 'Kode terbaru dikirim ke email Anda.' });
+});
+
+export const register = endpoint(async (req, res) => {
+  const name = text(req.body.name, 'Nama lengkap', { min: 2, max: 150 });
+  const address = email(req.body.email);
+  const hashed = await hashPassword(password(req.body.password));
+  const officeInput = text(req.body.office_id || req.body.office_name, 'Kantor', { min: 2, max: 150 });
+  const regionId = text(req.body.region_id, 'Regional', { max: 50 });
+  const position = text(req.body.position, 'Jabatan', { max: 100, optional: true });
+  const nip = text(req.body.nip, 'NIP', { max: 50, optional: true });
+  const userId = id('USR');
+  await transaction(pool, async db => {
+    const finalOfficeId = await validateOrganization(db, regionId, officeInput);
+    await db.query(`INSERT INTO users (user_id, name, email, password_hash, role, is_active, account_status, region_id, office_id, data_scope, position, nip, created_by)
+      VALUES (?, ?, ?, ?, 'UPT_LUAR', 0, 'PENDING', ?, ?, 'OFFICE', ?, ?, 'self_registration')`, [userId, name, address, hashed, regionId, finalOfficeId, position, nip]);
+    await db.query("INSERT INTO registration_approvals (approval_id, user_id, status) VALUES (?, ?, 'PENDING')", [id('APV'), userId]);
+    await audit(db, { user_id: userId, name, role: 'UPT_LUAR' }, 'REGISTER', userId, 'Pendaftaran akun menunggu persetujuan');
+  });
+  res.status(201).json({ status: 'success', account_status: 'PENDING', message: 'Pendaftaran berhasil. Tunggu verifikasi administrator sebelum masuk.', data: { user_id: userId, account_status: 'PENDING' } });
+});
+
+export const getProfile = endpoint(async (req, res) => res.json({ status: 'success', data: await profile(pool, req.user.user_id) }));
+export const logout = endpoint(async (req, res) => {
+  await pool.query('UPDATE login_sessions SET is_revoked = 1 WHERE session_id = ?', [req.sessionId]);
+  res.json({ status: 'success', message: 'Anda telah keluar.' });
+});
+export const changePassword = endpoint(async (req, res) => {
+  const newHash = await hashPassword(password(req.body.new_password));
+  await transaction(pool, async db => {
+    const [[user]] = await db.query('SELECT * FROM users WHERE user_id = ? FOR UPDATE', [req.user.user_id]);
+    if (!await verifyPassword(req.body.current_password, user.password_hash)) throw new HttpError(400, 'Kata sandi saat ini tidak cocok.');
+    await db.query('UPDATE users SET password_hash = ? WHERE user_id = ?', [newHash, user.user_id]);
+    await db.query('UPDATE login_sessions SET is_revoked = 1 WHERE user_id = ?', [user.user_id]);
+    await db.query('UPDATE mfa_challenges SET is_used = 1 WHERE user_id = ?', [user.user_id]);
+    await audit(db, user, 'PASSWORD_CHANGED', user.user_id, 'Kata sandi diubah dan semua sesi diakhiri');
+  });
+  res.json({ status: 'success', message: 'Kata sandi diperbarui. Silakan masuk kembali.' });
+});
+export const setupMfa = endpoint(async (req, res) => {
+  const [[user]] = await pool.query('SELECT * FROM users WHERE user_id = ?', [req.user.user_id]);
+  if (!await verifyPassword(req.body.current_password, user.password_hash)) throw new HttpError(400, 'Kata sandi saat ini tidak cocok.');
+  if (user.totp_secret) throw new HttpError(409, 'Authenticator sudah aktif.');
+  const secret = generateTotpSecret();
+  await pool.query('UPDATE users SET totp_pending_secret = ?, totp_pending_until = DATE_ADD(NOW(), INTERVAL 10 MINUTE) WHERE user_id = ?', [encryptSecret(secret), user.user_id]);
+  res.json({ status: 'success', data: { secret, qr_uri: generateTotpUri('PRISMA POS', user.email, secret) } });
+});
+export const confirmMfa = endpoint(async (req, res) => {
+  const backupCodes = generateBackupCodes();
+  await transaction(pool, async db => {
+    const [[user]] = await db.query('SELECT * FROM users WHERE user_id = ? FOR UPDATE', [req.user.user_id]);
+    if (!user.totp_pending_secret || new Date(user.totp_pending_until) <= new Date()) throw new HttpError(400, 'Pengaturan authenticator telah kedaluwarsa.');
+    const step = Math.floor(Date.now() / 30000);
+    const validStep = [-1,0,1].map(offset => step + offset).find(candidate => safeEqual(generateTotpCode(decryptSecret(user.totp_pending_secret), candidate), req.body.code));
+    if (!validStep) throw new HttpError(400, 'Kode authenticator tidak cocok.');
+    await db.query('UPDATE users SET totp_secret = totp_pending_secret, totp_pending_secret = NULL, totp_pending_until = NULL, totp_last_step = ?, mfa_enabled = 1, mfa_backup_codes = ? WHERE user_id = ?', [validStep, JSON.stringify(backupCodes.map(digest)), user.user_id]);
+    await db.query('UPDATE login_sessions SET is_revoked = 1 WHERE user_id = ? AND session_id <> ?', [user.user_id, req.sessionId]);
+    await audit(db, user, 'MFA_ENABLE', user.user_id, 'Authenticator diaktifkan');
+  });
+  res.json({ status: 'success', message: 'Authenticator aktif. Simpan kode pemulihan di tempat aman.', data: { backup_codes: backupCodes } });
+});

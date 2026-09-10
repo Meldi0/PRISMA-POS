@@ -23,7 +23,7 @@ export type AccountStatus = 'PENDING' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED' | 'I
 
 export type DataScope = 'GLOBAL' | 'REGIONAL' | 'OFFICE' | 'OWN';
 
-export type TicketStatus = 'open' | 'in_progress' | 'waiting' | 'closed';
+export type TicketStatus = 'open' | 'in_progress' | 'waiting' | 'resolved' | 'closed';
 
 export type TicketPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
 
@@ -99,7 +99,6 @@ export interface User {
   is_active: boolean;
   created_by?: string;
   created_at: string;
-  password_plain?: string;
 
   // Profil Dinas Lengkap Pos Indonesia
   nip?: string;
@@ -113,6 +112,11 @@ export interface User {
 }
 
 export interface Ticket {
+  version?: number;
+  attachment_count?: number;
+  requester_id?: string;
+  resolved_at?: string;
+  closed_at?: string;
   ticket_id: string;
   created_at: string;
   updated_at: string;
@@ -207,6 +211,7 @@ export interface ApiResponse<T = any> {
   challenge_token?: string;
   masked_email?: string;
   smtp_configured?: boolean;
+  mfa_method?: 'email' | 'totp';
   otp_preview?: string;
   account_status?: AccountStatus;
 }

@@ -43,7 +43,7 @@ export function resolveSslConfig(isSsl) {
     };
   }
 
-  return { rejectUnauthorized: false };
+  return { rejectUnauthorized: true };
 }
 
 /**
@@ -70,6 +70,7 @@ export function createPoolInstance(config) {
     ssl: sslConfig,
     enableKeepAlive: true,
     keepAliveInitialDelay: 10000
+    ,timezone: 'Z'
   });
 }
 

@@ -2,8 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import apiRouter from './routes/api.js';
+import { securityHeaders } from './middleware/securityMiddleware.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,16 +13,17 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const app = express();
+app.disable('x-powered-by');
+if (process.env.TRUST_PROXY_HOPS) app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS));
 const PORT = process.env.PORT || 5001;
 
 // Middleware
-app.use(cors({
-  origin: true,
-  credentials: true
-}));
+const allowedOrigins = (process.env.APP_ORIGINS || process.env.APP_BASE_URL || 'http://localhost:3000,http://localhost:3001,http://localhost:4173').split(',').map(value => value.trim());
+app.use(securityHeaders);
+app.use(cors({ origin: (origin, callback) => callback(null, !origin || allowedOrigins.includes(origin)), credentials: false }));
 
-app.use(express.json({ limit: '25mb' }));
-app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: false, limit: '32kb' }));
 
 // Mount API routes
 app.use('/api', apiRouter);
@@ -48,17 +50,19 @@ app.use((req, res) => {
 
 // Global error handler
 app.use((err, req, res, next) => {
-  console.error('Unhandled Server Error:', err);
-  res.status(500).json({
+  const status = err.code === 'ER_DUP_ENTRY' ? 409 : (err.status && err.status >= 400 && err.status < 600 ? err.status : 500);
+  if (status >= 500) console.error('Request failed:', err.code || err.name);
+  res.status(status).json({
     status: 'error',
-    code: 500,
-    message: err.message || 'Terjadi kesalahan internal server.'
+    code: status,
+    message: err.code === 'ER_DUP_ENTRY' ? 'Data tersebut sudah terdaftar. Periksa kembali informasi Anda.' : status === 413 ? 'Ukuran unggahan terlalu besar. Total lampiran maksimal 10 MB.' : status >= 500 ? (err.status === 503 ? err.message : 'Layanan sedang mengalami gangguan. Coba lagi beberapa saat.') : err.message,
+    fields: err.fields
   });
 });
 
 // Only listen locally, Vercel serverless handles HTTP natively
-if (!process.env.VERCEL) {
-  const HOST = '0.0.0.0';
+if (!process.env.VERCEL && process.env.NODE_ENV !== 'test' && !process.env.TEST_MODE) {
+  const HOST = process.env.HOST || '127.0.0.1';
   const server = app.listen(PORT, HOST, () => {
     console.log(`=======================================================`);
     console.log(` POSO Backend API Server running on http://${HOST}:${PORT}`);

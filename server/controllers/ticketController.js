@@ -1,921 +1,241 @@
 import { pool } from '../config/db.js';
 import { buildDataScopeFilter } from '../utils/permissions.js';
-import { 
-  sendTicketCreatedAlert, 
-  sendTicketStatusAlert, 
-  sendTicketReopenAlert, 
-  sendNewReplyAlert 
-} from '../utils/telegram.js';
+import { can, isStaff, canAccessTicket, scopeFor } from '../utils/access.js';
+import { HttpError, id, text, choice, integer, transaction, audit, endpoint } from '../utils/security.js';
+import { STATUSES, PRIORITIES, SLA_HOURS, validateTransition, validateAttachments } from '../utils/ticketPolicy.js';
+import { sendTicketCreatedAlert, sendTicketStatusAlert, sendTicketReopenAlert, sendNewReplyAlert } from '../utils/telegram.js';
 
-export function isUptUnitMatch(userUnit, ticketUnit) {
-  if (!userUnit || !ticketUnit) return false;
-  const u = userUnit.toLowerCase().trim();
-  const t = ticketUnit.toLowerCase().trim();
-  if (u === t) return true;
-  if ((u.includes('ti') || u.includes('it') || u.includes('jaringan') || u.includes('sistem')) &&
-      (t.includes('ti') || t.includes('it') || t.includes('jaringan') || t.includes('sistem'))) {
-    return true;
-  }
-  if ((u.includes('sarpras') || u.includes('sarana') || u.includes('cgs')) &&
-      (t.includes('sarpras') || t.includes('sarana') || t.includes('cgs'))) {
-    return true;
-  }
-  if ((u.includes('sec') || u.includes('keamanan') || u.includes('security')) &&
-      (t.includes('sec') || t.includes('keamanan') || t.includes('security'))) {
-    return true;
-  }
-  if ((u.includes('qc') || u.includes('quality')) &&
-      (t.includes('qc') || t.includes('quality'))) {
-    return true;
-  }
-  return u.includes(t) || t.includes(u);
+const SERVICE_UNITS = {
+  'Pengendalian Operasi': 'UPT Pengendalian Operasi & Transportasi',
+  'Corporate General Services (CGS)': 'UPT Sarana & Prasarana (CGS)',
+  'Postal Security': 'UPT Postal Security & Keamanan',
+  'Quality Control': 'UPT Quality Control & Audit SLA',
+  'TI & Sistem Informasi': 'UPT TI & Sistem Informasi',
+};
+const notify = (work) => { Promise.resolve().then(work).catch(error => console.warn('[Notification]', error.code || 'delivery_failed')); };
+const format = (ticket) => ({ ...ticket, is_archived: Boolean(ticket.is_archived) });
+const keyFrom = (req) => req.headers['idempotency-key'] ? text(req.headers['idempotency-key'], 'Kode permintaan', { min: 16, max: 64 }) : null;
+function requirePermission(user, permission) {
+  if (!can(user, permission)) throw new HttpError(403, 'Anda tidak memiliki izin untuk tindakan ini.');
 }
-
-export async function getTickets(req, res) {
-  try {
-    const user = req.user;
-    const {
-      status,
-      priority,
-      category,
-      assigned_upt,
-      search,
-      page = 1,
-      limit = 50,
-      requester_email
-    } = req.query;
-
-    const pageNum = Math.max(1, parseInt(page, 10));
-    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10)));
-    const offset = (pageNum - 1) * limitNum;
-
-    let conditions = ['1=1'];
-    let params = [];
-
-    // 1. DATA SCOPE FILTERING (GLOBAL, REGIONAL, OFFICE, OWN)
-    if (user) {
-      const scopeFilter = buildDataScopeFilter(user, 'tickets');
-      conditions.push(scopeFilter.clause);
-      params.push(...scopeFilter.params);
-
-      // Legacy support for UPT unit matching if user is legacy UPT
-      if (user.role === 'upt' && user.upt_unit) {
-        const unit = user.upt_unit.toLowerCase().trim();
-        conditions.push('(LOWER(assigned_upt) LIKE ? OR LOWER(assigned_upt) LIKE ? OR LOWER(requester_email) = ?)');
-        params.push(`%${unit}%`, `%${unit.split(' ')[0]}%`, user.email.toLowerCase().trim());
-      }
-    } else if (requester_email) {
-      conditions.push('LOWER(requester_email) = ?');
-      params.push(requester_email.toLowerCase().trim());
-    }
-
-    // 2. Query Parameter Filters
-    if (status && status !== 'all') {
-      conditions.push('LOWER(status) = ?');
-      params.push(status.toLowerCase().trim());
-    }
-    if (priority && priority !== 'all') {
-      conditions.push('LOWER(priority) = ?');
-      params.push(priority.toLowerCase().trim());
-    }
-    if (category && category !== 'all') {
-      conditions.push('LOWER(category) = ?');
-      params.push(category.toLowerCase().trim());
-    }
-    if (assigned_upt && assigned_upt !== 'all') {
-      conditions.push('LOWER(assigned_upt) = ?');
-      params.push(assigned_upt.toLowerCase().trim());
-    }
-    if (search && search.trim()) {
-      const q = `%${search.trim().toLowerCase()}%`;
-      conditions.push('(LOWER(ticket_id) LIKE ? OR LOWER(subject) LIKE ? OR LOWER(description) LIKE ? OR LOWER(requester_email) LIKE ? OR LOWER(requester_name) LIKE ?)');
-      params.push(q, q, q, q, q);
-    }
-
-    const whereClause = conditions.join(' AND ');
-
-    // Count Total
-    const [countRows] = await pool.query(
-      `SELECT COUNT(*) AS total FROM tickets WHERE ${whereClause}`,
-      params
-    );
-    const total = countRows[0].total;
-
-    // Fetch Paginated Records with Region and Office details
-    const [rows] = await pool.query(
-      `SELECT 
-        tickets.*,
-        r.name AS region_name,
-        r.code AS region_code,
-        o.name AS office_name,
-        o.code AS office_code,
-        o.type AS office_type
-      FROM tickets
-      LEFT JOIN regions r ON tickets.region_id = r.region_id
-      LEFT JOIN offices o ON tickets.office_id = o.office_id
-      WHERE ${whereClause} 
-      ORDER BY tickets.created_at DESC 
-      LIMIT ? OFFSET ?`,
-      [...params, limitNum, offset]
-    );
-
-    const formattedRows = rows.map(t => ({
-      ...t,
-      is_archived: Boolean(t.is_archived)
-    }));
-
-    return res.status(200).json({
-      status: 'success',
-      data: {
-        tickets: formattedRows,
-        total,
-        page: pageNum,
-        limit: limitNum,
-        total_pages: Math.ceil(total / limitNum)
-      }
-    });
-  } catch (err) {
-    console.error('Error in getTickets:', err);
-    return res.status(500).json({
-      status: 'error',
-      code: 500,
-      message: 'Gagal memuat daftar tiket.'
-    });
-  }
+async function accessible(db, user, ticketId, lock = false) {
+  const [[ticket]] = await db.query('SELECT * FROM tickets WHERE ticket_id = ?' + (lock ? ' FOR UPDATE' : ''), [ticketId]);
+  if (!ticket || !canAccessTicket(user, ticket)) throw new HttpError(404, 'Tiket tidak ditemukan atau tidak tersedia dalam cakupan akses Anda.');
+  return ticket;
 }
-
-export async function getTicketDetail(req, res) {
-  try {
-    const { id } = req.params;
-    const user = req.user;
-
-    const [ticketRows] = await pool.query(
-      `SELECT 
-        t.*,
-        r.name AS region_name,
-        r.code AS region_code,
-        o.name AS office_name,
-        o.code AS office_code,
-        o.type AS office_type
-      FROM tickets t
-      LEFT JOIN regions r ON t.region_id = r.region_id
-      LEFT JOIN offices o ON t.office_id = o.office_id
-      WHERE t.ticket_id = ? 
-      LIMIT 1`,
-      [id]
-    );
-
-    if (ticketRows.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        code: 404,
-        message: 'Tiket tidak ditemukan di sistem POSO.'
-      });
-    }
-
-    const ticket = ticketRows[0];
-
-    // Data Scope Authorization Check
-    if (user) {
-      const role = user.role;
-      const isPrivileged = role === 'ADMIN' || role === 'PETUGAS_UPT' || role === 'ADMIN_PUSAT' || role === 'OPERATOR';
-
-      if (!isPrivileged) {
-        // UPT_LUAR: allowed if own ticket OR same office
-        const isOwn = (ticket.requester_email && user.email && ticket.requester_email.toLowerCase() === user.email.toLowerCase()) ||
-                      (ticket.requester_name && user.name && ticket.requester_name.toLowerCase() === user.name.toLowerCase());
-        const isSameOffice = user.office_id && ticket.office_id && user.office_id === ticket.office_id;
-
-        if (!isOwn && !isSameOffice) {
-          return res.status(403).json({
-            status: 'error',
-            code: 403,
-            message: 'Akses ditolak. Anda tidak memiliki wewenang untuk mengakses tiket di luar kantor/unit penugasan Anda.'
-          });
-        }
-      }
-    }
-
-    // Fetch threads
-    const isStaff = user && (user.role === 'ADMIN' || user.role === 'PETUGAS_UPT' || user.role === 'ADMIN_PUSAT' || user.role === 'OPERATOR');
-    let threadQuery = 'SELECT * FROM threads WHERE ticket_id = ?';
-    const threadParams = [id];
-
-    if (!isStaff) {
-      threadQuery += " AND visibility = 'public'";
-    }
-    threadQuery += ' ORDER BY created_at ASC';
-
-    const [threadRows] = await pool.query(threadQuery, threadParams);
-
-    return res.status(200).json({
-      status: 'success',
-      data: {
-        ticket: {
-          ...ticket,
-          is_archived: Boolean(ticket.is_archived)
-        },
-        threads: threadRows
-      }
-    });
-  } catch (err) {
-    console.error('Error in getTicketDetail:', err);
-    return res.status(500).json({
-      status: 'error',
-      code: 500,
-      message: 'Gagal memuat rincian tiket.'
-    });
-  }
+async function addMessage(db, user, ticketId, message, visibility = 'public', requestKey = null) {
+  const thread = { thread_id: id('TH'), ticket_id: ticketId, sender_id: user.user_id, sender_name: user.name, sender_role: user.role, message, visibility };
+  await db.query(`INSERT INTO threads (thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility, idempotency_key)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [...Object.values(thread), requestKey]);
+  return thread;
 }
-
-export async function trackTicket(req, res) {
-  try {
-    const { id } = req.params;
-    const { email } = req.query;
-
-    const [ticketRows] = await pool.query(
-      `SELECT 
-        t.*,
-        r.name AS region_name,
-        r.code AS region_code,
-        o.name AS office_name,
-        o.code AS office_code,
-        o.type AS office_type
-      FROM tickets t
-      LEFT JOIN regions r ON t.region_id = r.region_id
-      LEFT JOIN offices o ON t.office_id = o.office_id
-      WHERE t.ticket_id = ? 
-      LIMIT 1`,
-      [id.trim()]
-    );
-
-    if (ticketRows.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        code: 404,
-        message: 'Nomor ID tiket tidak ditemukan di sistem POSO.'
-      });
+function queryFilter(req) {
+  const scope = buildDataScopeFilter(req.user, 't');
+  const conditions = [scope.clause];
+  const params = [...scope.params];
+  for (const [name, values] of [['status', STATUSES], ['priority', PRIORITIES]]) {
+    if (req.query[name] && req.query[name] !== 'all') {
+      conditions.push('t.' + name + ' = ?');
+      params.push(choice(req.query[name], values, name));
     }
-
-    const ticket = ticketRows[0];
-
-    if (email && email.trim()) {
-      if (ticket.requester_email.toLowerCase() !== email.toLowerCase().trim()) {
-        return res.status(403).json({
-          status: 'error',
-          code: 403,
-          message: 'Alamat email tidak cocok dengan email pelapor tiket ini.'
-        });
-      }
-    }
-
-    const [threads] = await pool.query(
-      "SELECT * FROM threads WHERE ticket_id = ? AND visibility = 'public' ORDER BY created_at ASC",
-      [ticket.ticket_id]
-    );
-
-    return res.status(200).json({
-      status: 'success',
-      data: {
-        ticket: {
-          ...ticket,
-          is_archived: Boolean(ticket.is_archived)
-        },
-        threads
-      }
-    });
-  } catch (err) {
-    console.error('Error in trackTicket:', err);
-    return res.status(500).json({
-      status: 'error',
-      code: 500,
-      message: 'Gagal melacak tiket.'
-    });
   }
-}
-
-export async function createTicket(req, res) {
-  try {
-    const user = req.user;
-    const {
-      subject,
-      category,
-      department,
-      topic,
-      location,
-      description,
-      priority = 'Medium',
-      channel = 'web',
-      requester_name,
-      requester_email,
-      requester_phone,
-      requester_nip,
-      assigned_upt,
-      region_id,
-      office_id,
-      attachments = []
-    } = req.body;
-
-    const finalCategory = category || department || 'OPERASIONAL';
-
-    if (!subject || !finalCategory || !description) {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Subjek, kategori/departemen, dan deskripsi keluhan wajib diisi.'
-      });
-    }
-
-    const email = (user ? user.email : requester_email || '').toLowerCase().trim();
-    const name = user ? user.name : requester_name || 'Pelapor Dinas';
-    const phone = requester_phone || (user ? user.phone_number : null);
-    const nip = requester_nip || (user ? user.nip : null);
-
-    if (!email) {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Email pelapor wajib disertakan.'
-      });
-    }
-
-    // Otomatisasi data regional dan kantor: prioritaskan identitas akun dinas yang sedang login
-    let finalRegionId = null;
-    let finalOfficeId = null;
-
-    if (user) {
-      finalRegionId = user.region_id || null;
-      finalOfficeId = user.office_id || null;
-
-      // Jika di session belum lengkap, query database akun secara langsung
-      if (!finalRegionId || !finalOfficeId) {
-        const [uRows] = await pool.query('SELECT region_id, office_id FROM users WHERE user_id = ?', [user.user_id]);
-        if (uRows.length > 0) {
-          finalRegionId = finalRegionId || uRows[0].region_id;
-          finalOfficeId = finalOfficeId || uRows[0].office_id;
-        }
-      }
-    }
-
-    // Fallback hanya berlaku jika publik tanpa login atau akun belum diset kantornya
-    if (!finalRegionId) finalRegionId = region_id || 'REG-03';
-    if (!finalOfficeId) finalOfficeId = office_id || 'OFC-KCU-BDG';
-
-    // Generate Ticket ID
-    const today = new Date();
-    const dateStr = today.getFullYear().toString() + 
-      (today.getMonth() + 1).toString().padStart(2, '0') + 
-      today.getDate().toString().padStart(2, '0');
-    const randomPart = Math.floor(1000 + Math.random() * 9000);
-    const ticketId = `TICK-${dateStr}-${randomPart}`;
-
-    // SLA Calculation
-    let slaHours = 24;
-    if (priority === 'Urgent') slaHours = 4;
-    else if (priority === 'High') slaHours = 8;
-    else if (priority === 'Medium') slaHours = 24;
-    else if (priority === 'Low') slaHours = 72;
-
-    const slaDueAt = new Date(Date.now() + slaHours * 3600000);
-
-    await pool.query(`
-      INSERT INTO tickets (
-        ticket_id, subject, category, department, topic, location,
-        description, priority, status, channel, requester_name, requester_email,
-        requester_phone, requester_nip, assigned_upt, region_id, office_id, sla_due_at, attachments
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      ticketId, subject.trim(), finalCategory.trim(), department || null, topic || null,
-      location || null, description, priority, channel, name, email, phone,
-      nip || null, assigned_upt || null, finalRegionId, finalOfficeId, slaDueAt,
-      JSON.stringify(attachments)
-    ]);
-
-    // Insert Initial Thread
-    const threadId = `TH-${Date.now().toString().slice(-6)}`;
-    await pool.query(`
-      INSERT INTO threads (
-        thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility
-      ) VALUES (?, ?, ?, ?, ?, ?, 'public')
-    `, [
-      threadId, ticketId, user ? user.user_id : 'PUBLIC', name,
-      user ? user.role : 'PELAPOR', description
-    ]);
-
-    // Audit Log
-    try {
-      await pool.query(`
-        INSERT INTO audit_logs (log_id, ticket_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
-        VALUES (?, ?, ?, ?, 'CREATE_TICKET', 'TICKET', ?, ?, ?)
-      `, [
-        `LOG-${Date.now().toString().slice(-6)}`, ticketId, user ? user.user_id : 'PUBLIC',
-        name, user ? user.role : 'PELAPOR', ticketId,
-        `Pembuatan tiket baru #${ticketId} prioritas ${priority}`,
-        `Pengajuan tiket baru oleh ${email}`
-      ]);
-    } catch (e) {}
-
-    const [newTicket] = await pool.query('SELECT * FROM tickets WHERE ticket_id = ?', [ticketId]);
-
-    const ticketData = {
-      ...newTicket[0],
-      ticket_id: ticketId,
-      is_archived: Boolean(newTicket[0].is_archived)
-    };
-
-    // Kirim notifikasi Telegram secara asynchronous non-blocking
-    try {
-      pool.query(
-        `SELECT o.name AS office_name, o.code AS office_code, r.name AS region_name 
-         FROM offices o 
-         LEFT JOIN regions r ON o.region_id = r.region_id 
-         WHERE o.office_id = ? LIMIT 1`,
-        [finalOfficeId]
-      ).then(([officeDetails]) => {
-        const meta = officeDetails && officeDetails[0] ? officeDetails[0] : {};
-        sendTicketCreatedAlert(ticketData, meta).catch(err => {
-          console.warn('[Telegram Alert Error]', err.message);
-        });
-      }).catch(err => {
-        console.warn('[Telegram Meta Fetch Error]', err.message);
-      });
-    } catch (e) {}
-
-    return res.status(201).json({
-      status: 'success',
-      code: 201,
-      message: 'Tiket berhasil dibuat dan diterbitkan.',
-      data: {
-        ...ticketData,
-        ticket: ticketData,
-        ticket_id: ticketId
-      }
-    });
-  } catch (err) {
-    console.error('Error in createTicket:', err);
-    return res.status(500).json({
-      status: 'error',
-      code: 500,
-      message: 'Gagal membuat tiket.'
-    });
+  for (const name of ['category', 'assigned_upt']) {
+    if (req.query[name] && req.query[name] !== 'all') { conditions.push('t.' + name + ' = ?'); params.push(text(req.query[name], 'Filter', { max: 150 })); }
   }
+  if (req.query.archived === 'true') conditions.push('t.is_archived = 1');
+  if (req.query.archived === 'false') conditions.push('t.is_archived = 0');
+  if (req.query.mine === 'true') { conditions.push('t.requester_id = ?'); params.push(req.user.user_id); }
+  if (req.query.requester_email) { conditions.push('LOWER(t.requester_email) = ?'); params.push(String(req.query.requester_email).toLowerCase()); }
+  if (req.query.search) {
+    const search = '%' + text(req.query.search, 'Pencarian', { max: 200 }) + '%';
+    conditions.push('(t.ticket_id LIKE ? OR t.subject LIKE ? OR t.requester_name LIKE ? OR t.requester_email LIKE ?)');
+    params.push(search, search, search, search);
+  }
+  return { sql: conditions.join(' AND '), params };
 }
+export const getTickets = endpoint(async (req, res) => {
+  const page = integer(req.query.page, 1, 1000000);
+  const limit = integer(req.query.limit, 25, 100);
+  const filter = queryFilter(req);
+  const [[count]] = await pool.query('SELECT COUNT(*) AS total FROM tickets t WHERE ' + filter.sql, filter.params);
+  const [rows] = await pool.query(`SELECT t.ticket_id, t.subject, t.category, t.department, t.topic, t.location, t.region_id, t.office_id,
+    t.description, t.priority, t.status, t.channel, t.requester_id, t.requester_name, t.requester_email, t.requester_nip,
+    t.assigned_upt, t.assigned_operator, t.sla_due_at, t.resolved_at, t.closed_at, t.is_archived, t.reopen_status, t.version, t.created_at, t.updated_at,
+    JSON_LENGTH(t.attachments) AS attachment_count, r.name AS region_name, r.code AS region_code, o.name AS office_name, o.code AS office_code
+    FROM tickets t LEFT JOIN regions r ON r.region_id = t.region_id LEFT JOIN offices o ON o.office_id = t.office_id
+    WHERE ${filter.sql} ORDER BY t.created_at DESC, t.ticket_id DESC LIMIT ? OFFSET ?`, [...filter.params, limit, (page - 1) * limit]);
+  res.json({ status: 'success', data: { tickets: rows.map(format), total: count.total, page, limit, total_pages: Math.ceil(count.total / limit) } });
+});
+export const getTicketSummary = endpoint(async (req, res) => {
+  const filter = queryFilter(req);
+  const [[summary]] = await pool.query(`SELECT COUNT(*) AS total, COALESCE(SUM(status = 'open'),0) AS open,
+    COALESCE(SUM(status = 'in_progress'),0) AS in_progress, COALESCE(SUM(status = 'waiting'),0) AS waiting,
+    COALESCE(SUM(status = 'resolved'),0) AS resolved, COALESCE(SUM(status = 'closed'),0) AS closed,
+    COALESCE(SUM(status NOT IN ('resolved','closed') AND sla_due_at < NOW()),0) AS overdue,
+    COALESCE(SUM(reopen_status = 'PENDING'),0) AS reopen_pending FROM tickets t WHERE ${filter.sql}`, filter.params);
+  res.json({ status: 'success', data: summary });
+});
+export const getTicketDetail = endpoint(async (req, res) => {
+  const ticket = await accessible(pool, req.user, req.params.id);
+  const [[meta]] = await pool.query('SELECT r.name AS region_name, r.code AS region_code, o.name AS office_name, o.code AS office_code FROM offices o JOIN regions r ON r.region_id = o.region_id WHERE o.office_id = ?', [ticket.office_id]);
+  const internal = isStaff(req.user) && can(req.user, 'ticket.reply');
+  const [threads] = await pool.query('SELECT thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility, created_at FROM threads WHERE ticket_id = ?' + (internal ? '' : " AND visibility = 'public'") + ' ORDER BY created_at ASC, thread_id ASC', [ticket.ticket_id]);
+  res.json({ status: 'success', data: { ticket: format({ ...ticket, ...meta }), threads } });
+});
+export const trackTicket = getTicketDetail;
 
-export async function updateTicketStatus(req, res) {
-  try {
-    const { id } = req.params;
-    const { status, note, assigned_upt, assigned_operator, priority, is_archived } = req.body;
-    const user = req.user;
-
-    const [ticketRows] = await pool.query('SELECT * FROM tickets WHERE ticket_id = ? LIMIT 1', [id]);
-    if (ticketRows.length === 0) {
-      return res.status(404).json({ status: 'error', code: 404, message: 'Tiket tidak ditemukan.' });
+export const createTicket = endpoint(async (req, res) => {
+  requirePermission(req.user, 'ticket.create');
+  const subject = text(req.body.subject, 'Judul kendala', { min: 5, max: 255 });
+  const description = text(req.body.description, 'Rincian kendala', { min: 20, max: 10000 });
+  const department = choice(req.body.department || req.body.category, Object.keys(SERVICE_UNITS), 'Bidang layanan');
+  const topic = text(req.body.topic, 'Topik kendala', { max: 150 });
+  const location = text(req.body.location, 'Lokasi', { max: 150 });
+  const priority = choice(req.body.priority || 'Medium', PRIORITIES, 'Prioritas');
+  const attachments = validateAttachments(req.body.attachments);
+  const requestKey = keyFrom(req);
+  const result = await transaction(pool, async db => {
+    // Always use account identity, never requester fields supplied by the client.
+    const [[office]] = await db.query('SELECT o.office_id, o.region_id FROM users u JOIN offices o ON o.office_id = u.office_id AND o.region_id = u.region_id WHERE u.user_id = ? FOR UPDATE', [req.user.user_id]);
+    if (!office) throw new HttpError(400, 'Identitas kantor akun belum lengkap. Minta administrator melengkapi regional dan kantor sebelum membuat tiket.');
+    if (requestKey) {
+      const [[existing]] = await db.query('SELECT * FROM tickets WHERE requester_id = ? AND idempotency_key = ?', [req.user.user_id, requestKey]);
+      if (existing) return { ticket: existing, duplicate: true };
     }
+    const ticketId = id('TICK');
+    await db.query(`INSERT INTO tickets (ticket_id, subject, category, department, topic, location, description, priority, status, channel,
+      requester_id, requester_name, requester_email, requester_nip, region_id, office_id, assigned_upt, sla_due_at, attachments, idempotency_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', 'web', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [ticketId, subject, department, department, topic, location, description, priority, req.user.user_id, req.user.name, req.user.email, req.user.nip || null, office.region_id, office.office_id, SERVICE_UNITS[department], new Date(Date.now() + SLA_HOURS[priority] * 3600000), JSON.stringify(attachments), requestKey]);
+    await addMessage(db, req.user, ticketId, description);
+    await audit(db, req.user, 'CREATE_TICKET', ticketId, 'Pengajuan tiket ' + subject, ticketId);
+    const [[ticket]] = await db.query('SELECT * FROM tickets WHERE ticket_id = ?', [ticketId]);
+    return { ticket, duplicate: false };
+  });
+  if (!result.duplicate) notify(() => sendTicketCreatedAlert(result.ticket, {}));
+  res.status(result.duplicate ? 200 : 201).json({ status: 'success', message: 'Tiket berhasil dibuat.', data: format(result.ticket) });
+});
 
-    const ticket = ticketRows[0];
-
-    // UPT_LUAR is strictly prohibited from modifying ticket status or closing tickets!
-    if (user && (user.role === 'UPT_LUAR' || user.role === 'PELAPOR' || user.role === 'pengguna_umum')) {
-      return res.status(403).json({
-        status: 'error',
-        code: 403,
-        message: 'Akses ditolak. Pengguna UPT Luar tidak memiliki wewenang untuk mengubah status atau menutup tiket. Penutupan dan perubahan status tiket hanya dapat dilakukan oleh Petugas UPT Pusat atau Admin.'
-      });
-    }
-
-    const updates = [];
+export const updateTicketStatus = endpoint(async (req, res) => {
+  const user = req.user;
+  const body = req.body;
+  if (!isStaff(user)) throw new HttpError(403, 'Hanya petugas helpdesk yang dapat memperbarui tiket.');
+  const result = await transaction(pool, async db => {
+    const ticket = await accessible(db, user, req.params.id, true);
+    if (body.version !== undefined && body.version !== ticket.version) throw new HttpError(409, 'Tiket telah diperbarui petugas lain. Muat ulang sebelum menyimpan.');
+    const changes = [];
     const params = [];
-
-    if (status && status !== ticket.status) {
-      updates.push('status = ?');
-      params.push(status);
-
-      if (status === 'closed') {
-        updates.push('closed_at = NOW()');
-        updates.push('is_archived = 1');
-      } else {
-        updates.push('closed_at = NULL');
-        updates.push('is_archived = 0');
+    const note = text(body.note, 'Catatan', { min: 1, max: 10000, optional: true });
+    const newStatus = body.status || ticket.status;
+    if (body.status) {
+      validateTransition(user, ticket, body.status, note);
+      if (body.status !== ticket.status) {
+        changes.push('status = ?', 'is_archived = ?', 'closed_at = ?', 'resolved_at = ?');
+        params.push(body.status, body.status === 'closed' ? 1 : 0, body.status === 'closed' ? new Date() : null, body.status === 'resolved' ? new Date() : body.status === 'closed' ? ticket.resolved_at : null);
       }
     }
-
-    if (is_archived !== undefined) {
-      updates.push('is_archived = ?');
-      params.push(is_archived ? 1 : 0);
+    if (body.is_archived !== undefined && Boolean(body.is_archived) !== (newStatus === 'closed')) throw new HttpError(400, 'Arsip mengikuti status ditutup. Gunakan proses penyelesaian atau buka kembali tiket.');
+    if (body.priority !== undefined && body.priority !== ticket.priority) {
+      requirePermission(user, 'ticket.change_priority');
+      if (['resolved', 'closed'].includes(ticket.status)) throw new HttpError(409, 'Prioritas tiket selesai tidak dapat diubah.');
+      const priority = choice(body.priority, PRIORITIES, 'Prioritas');
+      changes.push('priority = ?', 'sla_due_at = ?');
+      // Recalculate against creation, never reset an elapsed SLA by lowering urgency.
+      params.push(priority, new Date(new Date(ticket.created_at).getTime() + SLA_HOURS[priority] * 3600000));
     }
-
-    if (assigned_upt !== undefined) {
-      updates.push('assigned_upt = ?');
-      params.push(assigned_upt);
+    if (body.assigned_upt !== undefined) {
+      requirePermission(user, 'ticket.assign');
+      changes.push('assigned_upt = ?');
+      params.push(choice(body.assigned_upt, Object.values(SERVICE_UNITS), 'Unit penanganan'));
     }
-
-    if (priority !== undefined) {
-      updates.push('priority = ?');
-      params.push(priority);
-    }
-
-    if (updates.length === 0 && !note) {
-      return res.status(400).json({ status: 'error', code: 400, message: 'Tidak ada data pembaruan yang dikirim.' });
-    }
-
-    if (updates.length > 0) {
-      updates.push('updated_at = NOW()');
-      params.push(id);
-      await pool.query(`UPDATE tickets SET ${updates.join(', ')} WHERE ticket_id = ?`, params);
-    }
-
-    // Add note as thread message if provided
-    if (note && note.trim()) {
-      const threadId = `TH-${Date.now().toString().slice(-6)}`;
-      const visibility = (status === 'closed' || status === 'waiting') ? 'public' : 'internal';
-      await pool.query(`
-        INSERT INTO threads (thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `, [
-        threadId, id, user ? user.user_id : 'STAFF', user ? user.name : 'Petugas Helpdesk',
-        user ? user.role : 'PETUGAS_UPT', note.trim(), visibility
-      ]);
-    }
-
-    // Audit Log
-    try {
-      await pool.query(`
-        INSERT INTO audit_logs (log_id, ticket_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
-        VALUES (?, ?, ?, ?, 'STATUS_CHANGE', 'TICKET', ?, ?, ?)
-      `, [
-        `LOG-${Date.now().toString().slice(-6)}`, id, user ? user.user_id : 'STAFF',
-        user ? user.name : 'Petugas', user ? user.role : 'PETUGAS_UPT', id,
-        `Status: ${ticket.status} -> ${status || ticket.status}${assigned_operator ? `, Operator: ${assigned_operator}` : ''}`,
-        `Pembaruan tiket oleh ${user ? user.name : 'Petugas'}`
-      ]);
-    } catch (e) {}
-
-    const [updatedTicket] = await pool.query('SELECT * FROM tickets WHERE ticket_id = ?', [id]);
-
-    // Kirim notifikasi Telegram jika status berubah
-    if (status && status !== ticket.status) {
-      try {
-        const ticketInfo = {
-          ...(updatedTicket[0] || ticket),
-          office_name: ticket.office_name || ticket.office_id
-        };
-        sendTicketStatusAlert(ticketInfo, ticket.status, status, user ? user.name : 'Petugas UPT', note).catch(err => {
-          console.warn('[Telegram Status Alert Error]', err.message);
-        });
-      } catch (e) {}
-    }
-
-    return res.status(200).json({
-      status: 'success',
-      message: 'Status tiket berhasil diperbarui.',
-      data: {
-        ticket: {
-          ...updatedTicket[0],
-          is_archived: Boolean(updatedTicket[0].is_archived)
-        }
+    if (body.assigned_operator !== undefined) {
+      requirePermission(user, 'ticket.assign');
+      let operator = null;
+      if (body.assigned_operator) {
+        [[operator]] = await db.query("SELECT * FROM users WHERE user_id = ? AND account_status = 'ACTIVE' AND is_active = 1", [body.assigned_operator]);
+        const scope = operator && scopeFor(operator);
+        if (!operator || !isStaff(operator) || (scope === 'OFFICE' && operator.office_id !== ticket.office_id) || (scope === 'REGIONAL' && operator.region_id !== ticket.region_id) || scope === 'OWN') throw new HttpError(400, 'Pilih operator aktif dengan cakupan kerja yang sesuai.');
       }
-    });
-  } catch (err) {
-    console.error('Error in updateTicketStatus:', err);
-    return res.status(500).json({ status: 'error', code: 500, message: 'Gagal memperbarui status tiket.' });
-  }
-}
-
-export async function addThreadMessage(req, res) {
-  try {
-    const { id } = req.params;
-    const { message, visibility = 'public' } = req.body;
-    const user = req.user;
-
-    if (!message || !message.trim()) {
-      return res.status(400).json({ status: 'error', code: 400, message: 'Isi pesan tidak boleh kosong.' });
+      changes.push('assigned_operator = ?'); params.push(operator?.user_id || null);
     }
+    if (!changes.length && !note) throw new HttpError(400, 'Tidak ada perubahan yang perlu disimpan.');
+    if (!changes.length && note) requirePermission(user, 'ticket.reply');
+    if (changes.length) await db.query('UPDATE tickets SET ' + changes.join(', ') + ', version = version + 1, updated_at = NOW() WHERE ticket_id = ?', [...params, ticket.ticket_id]);
+    if (note) await addMessage(db, user, ticket.ticket_id, note, ['waiting','resolved','closed'].includes(newStatus) ? 'public' : 'internal');
+    await audit(db, user, body.status && body.status !== ticket.status ? 'STATUS_CHANGE' : 'UPDATE_TICKET', ticket.ticket_id,
+      JSON.stringify({ from: ticket.status, to: newStatus, operator: body.assigned_operator, priority: body.priority }), ticket.ticket_id);
+    const [[updated]] = await db.query('SELECT * FROM tickets WHERE ticket_id = ?', [ticket.ticket_id]);
+    return { previous: ticket, ticket: updated };
+  });
+  if (result.previous.status !== result.ticket.status) notify(() => sendTicketStatusAlert(result.ticket, result.previous.status, result.ticket.status, user.name, body.note));
+  res.json({ status: 'success', message: 'Perubahan tiket disimpan.', data: format(result.ticket) });
+});
 
-    const [ticketRows] = await pool.query('SELECT * FROM tickets WHERE ticket_id = ? LIMIT 1', [id]);
-    if (ticketRows.length === 0) {
-      return res.status(404).json({ status: 'error', code: 404, message: 'Tiket tidak ditemukan.' });
+export const addThreadMessage = endpoint(async (req, res) => {
+  const message = text(req.body.message, 'Pesan', { max: 10000 });
+  const visibility = choice(req.body.visibility || 'public', ['public','internal'], 'Jenis pesan');
+  const user = req.user;
+  if (visibility === 'internal' && (!isStaff(user) || !can(user, 'ticket.reply'))) throw new HttpError(403, 'Catatan internal hanya tersedia untuk petugas berwenang.');
+  if (!(can(user, 'ticket.reply') || can(user, 'ticket.reply_own'))) throw new HttpError(403, 'Anda tidak memiliki izin mengirim pesan.');
+  const requestKey = keyFrom(req);
+  const result = await transaction(pool, async db => {
+    const ticket = await accessible(db, user, req.params.id, true);
+    if (ticket.status === 'closed') throw new HttpError(409, 'Tiket sudah ditutup. Ajukan buka kembali untuk melanjutkan percakapan.');
+    if (requestKey) {
+      const [[existing]] = await db.query('SELECT * FROM threads WHERE ticket_id = ? AND sender_id = ? AND idempotency_key = ?', [ticket.ticket_id, user.user_id, requestKey]);
+      if (existing) return { thread: existing, ticket, duplicate: true };
     }
+    const thread = await addMessage(db, user, ticket.ticket_id, message, visibility, requestKey);
+    await db.query('UPDATE tickets SET updated_at = NOW(), version = version + 1 WHERE ticket_id = ?', [ticket.ticket_id]);
+    await audit(db, user, 'THREAD_REPLY', thread.thread_id, 'Pesan ' + visibility + ' ditambahkan', ticket.ticket_id);
+    return { ticket, thread, duplicate: false };
+  });
+  if (!result.duplicate && visibility === 'public') notify(() => sendNewReplyAlert(result.ticket, user.name, user.role, message, 'public'));
+  res.status(result.duplicate ? 200 : 201).json({ status: 'success', message: 'Pesan terkirim.', data: result.thread });
+});
 
-    const ticket = ticketRows[0];
-
-    // Pembatasan Chat: Jika tiket closed, pelapor tidak dapat mengirim pesan baru
-    const isStaff = user && (user.role === 'ADMIN' || user.role === 'ADMIN_PUSAT' || user.role === 'PETUGAS_UPT' || user.role === 'OPERATOR');
-    if (ticket.status === 'closed' && !isStaff) {
-      return res.status(403).json({
-        status: 'error',
-        code: 403,
-        message: 'Tiket ini telah ditutup (Closed). Percakapan telah dinonaktifkan. Silakan ajukan opsi "Ajukan Buka Kembali Tiket" jika kendala masih berlanjut.'
-      });
-    }
-
-    // Pelapor / UPT_LUAR checks: can only reply to own ticket or same office, and cannot post internal notes
-    let finalVisibility = visibility;
-    const isPelapor = user && (user.role === 'UPT_LUAR' || user.role === 'PELAPOR' || user.role === 'pengguna_umum');
-    if (isPelapor) {
-      const isOwn = (ticket.requester_email && user.email && ticket.requester_email.toLowerCase() === user.email.toLowerCase()) ||
-                    (ticket.requester_name && user.name && ticket.requester_name.toLowerCase() === user.name.toLowerCase());
-      const isSameOffice = user.office_id && ticket.office_id && user.office_id === ticket.office_id;
-
-      if (!isOwn && !isSameOffice) {
-        return res.status(403).json({ status: 'error', code: 403, message: 'Anda hanya dapat membalas tiket milik sendiri atau unit kantor Anda.' });
-      }
-      finalVisibility = 'public';
-    }
-
-    const senderRole = user ? user.role : 'UPT_LUAR';
-    const senderName = user ? user.name : 'Pelapor Layanan';
-    const senderId = user ? user.user_id : 'PUBLIC';
-    const threadId = `TH-${Date.now().toString().slice(-6)}`;
-
-    await pool.query(`
-      INSERT INTO threads (thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, [threadId, id, senderId, senderName, senderRole, message.trim(), finalVisibility]);
-
-    await pool.query('UPDATE tickets SET updated_at = NOW() WHERE ticket_id = ?', [id]);
-
-    // Audit Log
-    try {
-      await pool.query(`
-        INSERT INTO audit_logs (log_id, ticket_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
-        VALUES (?, ?, ?, ?, 'THREAD_REPLY', 'THREAD', ?, ?, ?)
-      `, [
-        `LOG-${Date.now().toString().slice(-6)}`, id, senderId, senderName, senderRole, threadId,
-        `Tanggapan baru (${visibility})`,
-        `Pesan baru dikirimkan pada tiket #${id}`
-      ]);
-    } catch (e) {}
-
-    const [newThread] = await pool.query('SELECT * FROM threads WHERE thread_id = ?', [threadId]);
-
-    // Kirim notifikasi Telegram untuk balasan publik
-    if (finalVisibility === 'public') {
-      try {
-        sendNewReplyAlert(ticket, senderName, senderRole, message.trim(), 'public').catch(err => {
-          console.warn('[Telegram Thread Alert Error]', err.message);
-        });
-      } catch (e) {}
-    }
-
-    return res.status(201).json({
-      status: 'success',
-      message: 'Pesan balasan berhasil terkirim.',
-      data: newThread[0]
-    });
-  } catch (err) {
-    console.error('Error in addThreadMessage:', err);
-    return res.status(500).json({ status: 'error', code: 500, message: 'Gagal mengirim pesan.' });
-  }
-}
-
-/**
- * Request Ticket Reopen (Pelapor mengajukan buka kembali tiket yang closed)
- */
-export async function requestTicketReopen(req, res) {
-  try {
-    const { id } = req.params;
-    const { reason } = req.body;
-    const user = req.user;
-
-    if (!reason || !reason.trim()) {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Alasan pengajuan buka kembali tiket wajib diisi.'
-      });
-    }
-
-    const [ticketRows] = await pool.query('SELECT * FROM tickets WHERE ticket_id = ? LIMIT 1', [id]);
-    if (ticketRows.length === 0) {
-      return res.status(404).json({ status: 'error', code: 404, message: 'Tiket tidak ditemukan.' });
-    }
-
-    const ticket = ticketRows[0];
-
-    if (ticket.status !== 'closed') {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Permohonan buka kembali hanya berlaku untuk tiket yang berstatus Closed.'
-      });
-    }
-
-    // Periksa apakah sudah ada permohonan pending
-    const [existingPending] = await pool.query(
-      "SELECT * FROM ticket_reopen_requests WHERE ticket_id = ? AND status = 'PENDING' LIMIT 1",
-      [id]
-    );
-
-    if (existingPending.length > 0) {
-      return res.status(400).json({
-        status: 'error',
-        code: 400,
-        message: 'Tiket ini sudah memiliki permohonan buka kembali yang sedang menunggu persetujuan Operator UPT Pusat.'
-      });
-    }
-
-    const requestId = `ROP-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const requesterId = user ? user.user_id : 'PUBLIC';
-    const requesterName = user ? user.name : ticket.requester_name;
-    const requesterEmail = user ? user.email : ticket.requester_email;
-
-    await pool.query(`
-      INSERT INTO ticket_reopen_requests (
-        request_id, ticket_id, requester_id, requester_name, requester_email, reason, status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', NOW())
-    `, [requestId, id, requesterId, requesterName, requesterEmail, reason.trim()]);
-
-    // Update tickets reopen_status
-    await pool.query("UPDATE tickets SET reopen_status = 'PENDING' WHERE ticket_id = ?", [id]);
-
-    // Add thread notification
-    const threadId = `TH-${Date.now().toString().slice(-6)}`;
-    const reopenNotice = `📢 [PERMOHONAN REOPEN] Pelapor (${requesterName}) mengajukan permohonan buka kembali tiket ini dengan alasan: "${reason.trim()}". Menunggu peninjauan Operator UPT Pusat.`;
-    await pool.query(`
-      INSERT INTO threads (thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility)
-      VALUES (?, ?, ?, ?, ?, ?, 'public')
-    `, [threadId, id, requesterId, requesterName, user ? user.role : 'PELAPOR', reopenNotice]);
-
-    // Audit Log
-    try {
-      await pool.query(`
-        INSERT INTO audit_logs (log_id, ticket_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
-        VALUES (?, ?, ?, ?, 'REOPEN_REQUESTED', 'TICKET', ?, ?, ?)
-      `, [
-        `LOG-${Date.now().toString().slice(-6)}`, id, requesterId, requesterName, user ? user.role : 'PELAPOR', id,
-        `Pengajuan buka kembali tiket #${id}: ${reason.trim()}`,
-        `Permohonan reopen tiket diajukan oleh ${requesterName}`
-      ]);
-    } catch (e) {}
-
-    // Kirim alert Telegram untuk permohonan reopen
-    try {
-      sendTicketReopenAlert(ticket, requesterName, reason.trim()).catch(err => {
-        console.warn('[Telegram Reopen Alert Error]', err.message);
-      });
-    } catch (e) {}
-
-    return res.status(200).json({
-      status: 'success',
-      code: 200,
-      message: 'Permohonan buka kembali tiket berhasil diajukan dan dikirimkan ke Operator UPT Pusat.',
-      data: {
-        request_id: requestId,
-        ticket_id: id,
-        status: 'PENDING'
-      }
-    });
-  } catch (err) {
-    console.error('Error in requestTicketReopen:', err);
-    return res.status(500).json({ status: 'error', code: 500, message: 'Gagal mengajukan permohonan buka kembali tiket.' });
-  }
-}
-
-/**
- * Review Ticket Reopen (Operator UPT / Pusat menyetujui atau menolak permohonan)
- */
-export async function reviewTicketReopen(req, res) {
-  try {
-    const { id } = req.params;
-    const { action, note } = req.body;
-    const user = req.user;
-
-    const isStaff = user && (user.role === 'ADMIN' || user.role === 'ADMIN_PUSAT' || user.role === 'PETUGAS_UPT' || user.role === 'OPERATOR');
-    if (!isStaff) {
-      return res.status(403).json({
-        status: 'error',
-        code: 403,
-        message: 'Akses ditolak. Hanya Operator UPT Pusat atau Administrator yang berwenang meninjau permohonan buka kembali tiket.'
-      });
-    }
-
-    if (!action || (action !== 'APPROVE' && action !== 'REJECT')) {
-      return res.status(400).json({ status: 'error', code: 400, message: 'Tindakan verifikasi harus APPROVE atau REJECT.' });
-    }
-
-    const [ticketRows] = await pool.query('SELECT * FROM tickets WHERE ticket_id = ? LIMIT 1', [id]);
-    if (ticketRows.length === 0) {
-      return res.status(404).json({ status: 'error', code: 404, message: 'Tiket tidak ditemukan.' });
-    }
-
-    const [pendingRequests] = await pool.query(
-      "SELECT * FROM ticket_reopen_requests WHERE ticket_id = ? AND status = 'PENDING' ORDER BY created_at DESC LIMIT 1",
-      [id]
-    );
-
-    const targetRequest = pendingRequests[0];
-    const requestId = targetRequest ? targetRequest.request_id : null;
-
+export const requestTicketReopen = endpoint(async (req, res) => {
+  const reason = text(req.body.reason, 'Alasan buka kembali', { min: 10, max: 2000 });
+  if (!(can(req.user, 'ticket.reply_own') || can(req.user, 'ticket.reopen'))) throw new HttpError(403, 'Anda tidak memiliki izin mengajukan buka kembali.');
+  const result = await transaction(pool, async db => {
+    const ticket = await accessible(db, req.user, req.params.id, true);
+    if (ticket.status !== 'closed') throw new HttpError(409, 'Permohonan buka kembali hanya untuk tiket yang sudah ditutup.');
+    const [[pending]] = await db.query("SELECT request_id FROM ticket_reopen_requests WHERE ticket_id = ? AND status = 'PENDING'", [ticket.ticket_id]);
+    if (pending) throw new HttpError(409, 'Permohonan tiket ini sedang ditinjau. Tunggu keputusan petugas.');
+    const requestId = id('ROP');
+    await db.query(`INSERT INTO ticket_reopen_requests (request_id, ticket_id, requester_id, requester_name, requester_email, reason, status)
+      VALUES (?, ?, ?, ?, ?, ?, 'PENDING')`, [requestId, ticket.ticket_id, req.user.user_id, req.user.name, req.user.email, reason]);
+    await db.query("UPDATE tickets SET reopen_status = 'PENDING', version = version + 1, updated_at = NOW() WHERE ticket_id = ?", [ticket.ticket_id]);
+    await addMessage(db, req.user, ticket.ticket_id, 'Permohonan buka kembali: ' + reason);
+    await audit(db, req.user, 'REOPEN_REQUESTED', ticket.ticket_id, reason, ticket.ticket_id);
+    return { ticket, requestId };
+  });
+  notify(() => sendTicketReopenAlert(result.ticket, req.user.name, reason));
+  res.json({ status: 'success', message: 'Permohonan dikirim. Petugas akan meninjau alasan Anda.', data: { request_id: result.requestId, status: 'PENDING' } });
+});
+export const reviewTicketReopen = endpoint(async (req, res) => {
+  requirePermission(req.user, 'ticket.reopen');
+  if (!isStaff(req.user)) throw new HttpError(403, 'Hanya petugas helpdesk dapat meninjau permohonan.');
+  const action = choice(req.body.action, ['APPROVE','REJECT'], 'Keputusan');
+  const note = text(req.body.note, 'Catatan keputusan', { min: 10, max: 2000 });
+  const result = await transaction(pool, async db => {
+    const ticket = await accessible(db, req.user, req.params.id, true);
+    const [[request]] = await db.query("SELECT * FROM ticket_reopen_requests WHERE ticket_id = ? AND status = 'PENDING' FOR UPDATE", [ticket.ticket_id]);
+    if (!request || ticket.status !== 'closed') throw new HttpError(409, 'Tidak ada permohonan aktif yang dapat diproses.');
+    const reopenStatus = action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+    await db.query('UPDATE ticket_reopen_requests SET status = ?, reviewed_by = ?, reviewer_name = ?, review_note = ?, reviewed_at = NOW() WHERE request_id = ?', [reopenStatus, req.user.user_id, req.user.name, note, request.request_id]);
     if (action === 'APPROVE') {
-      // 1. Setujui Reopen: Ubah status tiket menjadi open, kosongkan closed_at, buka kunci chat
-      await pool.query(
-        "UPDATE tickets SET status = 'open', closed_at = NULL, is_archived = 0, reopen_status = 'APPROVED', updated_at = NOW() WHERE ticket_id = ?",
-        [id]
-      );
-
-      if (requestId) {
-        await pool.query(
-          "UPDATE ticket_reopen_requests SET status = 'APPROVED', reviewed_by = ?, reviewer_name = ?, review_note = ?, reviewed_at = NOW() WHERE request_id = ?",
-          [user.user_id, user.name, note || 'Permohonan disetujui', requestId]
-        );
-      }
-
-      // Thread message
-      const threadId = `TH-${Date.now().toString().slice(-6)}`;
-      const approveMessage = `✅ [TIKET DIBUKA KEMBALI] Permohonan buka kembali tiket telah DISETUJUI oleh Petugas UPT (${user.name}). Tiket kini berstatus OPEN dan percakapan kembali aktif. Catatan: "${note || 'Kendala akan ditindaklanjuti kembali.'}"`;
-      await pool.query(`
-        INSERT INTO threads (thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility)
-        VALUES (?, ?, ?, ?, ?, ?, 'public')
-      `, [threadId, id, user.user_id, user.name, user.role, approveMessage]);
-
-      // Audit Log
-      try {
-        await pool.query(`
-          INSERT INTO audit_logs (log_id, ticket_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
-          VALUES (?, ?, ?, ?, 'REOPEN_APPROVED', 'TICKET', ?, ?, ?)
-        `, [
-          `LOG-${Date.now().toString().slice(-6)}`, id, user.user_id, user.name, user.role, id,
-          `Tiket #${id} dibuka kembali (Reopen Approved) oleh ${user.name}`,
-          `Persetujuan permohonan buka kembali tiket`
-        ]);
-      } catch (e) {}
-
-      // Kirim notifikasi Telegram atas hasil review reopen
-    try {
-      const newStatusLabel = action === 'APPROVE' ? 'open (Reopen Disetujui)' : 'closed (Reopen Ditolak)';
-      sendTicketStatusAlert(ticket, 'closed', newStatusLabel, user.name, note || (action === 'APPROVE' ? 'Permohonan buka kembali disetujui' : 'Permohonan buka kembali ditolak')).catch(err => {
-        console.warn('[Telegram Reopen Review Alert Error]', err.message);
-      });
-    } catch (e) {}
-
-    return res.status(200).json({
-        status: 'success',
-        message: 'Permohonan buka kembali tiket berhasil disetujui. Tiket kini berstatus Open dan percakapan kembali aktif.',
-        data: { ticket_id: id, status: 'open', reopen_status: 'APPROVED' }
-      });
-    } else {
-      // 2. Tolak Reopen: Status tiket tetap closed, chat tetap terkunci
-      await pool.query(
-        "UPDATE tickets SET reopen_status = 'REJECTED', updated_at = NOW() WHERE ticket_id = ?",
-        [id]
-      );
-
-      if (requestId) {
-        await pool.query(
-          "UPDATE ticket_reopen_requests SET status = 'REJECTED', reviewed_by = ?, reviewer_name = ?, review_note = ?, reviewed_at = NOW() WHERE request_id = ?",
-          [user.user_id, user.name, note || 'Permohonan ditolak oleh operator', requestId]
-        );
-      }
-
-      // Thread message
-      const threadId = `TH-${Date.now().toString().slice(-6)}`;
-      const rejectMessage = `❌ [PERMOHONAN REOPEN DITOLAK] Permohonan pembukaan kembali tiket DITOLAK oleh Petugas UPT (${user.name}). Tiket tetap berstatus CLOSED. Alasan penolakan: "${note || 'Masalah telah diselesaikan sesuai SOP dan tidak memerlukan penanganan lanjutan.'}"`;
-      await pool.query(`
-        INSERT INTO threads (thread_id, ticket_id, sender_id, sender_name, sender_role, message, visibility)
-        VALUES (?, ?, ?, ?, ?, ?, 'public')
-      `, [threadId, id, user.user_id, user.name, user.role, rejectMessage]);
-
-      // Audit Log
-      try {
-        await pool.query(`
-          INSERT INTO audit_logs (log_id, ticket_id, actor_id, actor_name, actor_role, action, entity_type, entity_id, details, description)
-          VALUES (?, ?, ?, ?, 'REOPEN_REJECTED', 'TICKET', ?, ?, ?)
-        `, [
-          `LOG-${Date.now().toString().slice(-6)}`, id, user.user_id, user.name, user.role, id,
-          `Permohonan reopen tiket #${id} ditolak oleh ${user.name}: ${note || ''}`,
-          `Penolakan permohonan buka kembali tiket`
-        ]);
-      } catch (e) {}
-
-      return res.status(200).json({
-        status: 'success',
-        message: 'Permohonan buka kembali tiket telah ditolak. Tiket tetap berstatus Closed.',
-        data: { ticket_id: id, status: 'closed', reopen_status: 'REJECTED' }
-      });
-    }
-  } catch (err) {
-    console.error('Error in reviewTicketReopen:', err);
-    return res.status(500).json({ status: 'error', code: 500, message: 'Gagal meninjau permohonan reopen tiket.' });
-  }
-}
-
-/**
- * Get Reopen Requests for a Ticket
- */
-export async function getTicketReopenRequests(req, res) {
-  try {
-    const { id } = req.params;
-    const [rows] = await pool.query(
-      'SELECT * FROM ticket_reopen_requests WHERE ticket_id = ? ORDER BY created_at DESC',
-      [id]
-    );
-
-    return res.status(200).json({
-      status: 'success',
-      data: rows
-    });
-  } catch (err) {
-    console.error('Error in getTicketReopenRequests:', err);
-    return res.status(500).json({ status: 'error', code: 500, message: 'Gagal memuat riwayat permohonan reopen.' });
-  }
-}
+      await db.query("UPDATE tickets SET status = 'open', is_archived = 0, closed_at = NULL, resolved_at = NULL, reopen_status = ?, version = version + 1, updated_at = NOW() WHERE ticket_id = ?", [reopenStatus, ticket.ticket_id]);
+    } else await db.query('UPDATE tickets SET reopen_status = ?, version = version + 1, updated_at = NOW() WHERE ticket_id = ?', [reopenStatus, ticket.ticket_id]);
+    await addMessage(db, req.user, ticket.ticket_id, (action === 'APPROVE' ? 'Tiket dibuka kembali. ' : 'Permohonan buka kembali ditolak. ') + note);
+    await audit(db, req.user, 'REOPEN_' + reopenStatus, ticket.ticket_id, note, ticket.ticket_id);
+    return { ticket, reopenStatus };
+  });
+  notify(() => sendTicketStatusAlert(result.ticket, 'closed', action === 'APPROVE' ? 'open' : 'closed', req.user.name, note));
+  res.json({ status: 'success', message: 'Keputusan permohonan disimpan.', data: { status: action === 'APPROVE' ? 'open' : 'closed', reopen_status: result.reopenStatus } });
+});
+export const getTicketReopenRequests = endpoint(async (req, res) => {
+  await accessible(pool, req.user, req.params.id);
+  const [rows] = await pool.query('SELECT * FROM ticket_reopen_requests WHERE ticket_id = ? ORDER BY created_at DESC', [req.params.id]);
+  res.json({ status: 'success', data: rows });
+});
