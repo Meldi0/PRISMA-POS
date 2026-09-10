@@ -115,6 +115,19 @@ export async function sendOtpEmail({ toEmail, recipientName, otpCode }) {
     </html>
   `;
 
+  const textContent = `PT POS INDONESIA (PERSERO)
+PRISMA POS — Helpdesk Mitra Agen Pos
+
+Halo, ${recipientName || 'Mitra Agen Pos'}
+
+Kode verifikasi OTP masuk akun PRISMA POS Anda: ${otpCode}
+
+Kode ini berlaku selama 5 menit. Jangan berikan kode ini kepada siapapun demi keamanan akun Anda.
+
+Jika Anda tidak melakukan permintaan ini, abaikan email ini atau hubungi Admin Helpdesk Agen Pos.
+
+© ${new Date().getFullYear()} PT Pos Indonesia (Persero) — Pesan Otomatis`;
+
   const currentTransporter = getTransporter();
   const currentEmailFrom = process.env.EMAIL_FROM || (process.env.SMTP_USER ? `"PRISMA POS Helpdesk Agen" <${process.env.SMTP_USER}>` : '"PRISMA POS Helpdesk" <no-reply@poso.local>');
 
@@ -124,7 +137,12 @@ export async function sendOtpEmail({ toEmail, recipientName, otpCode }) {
         from: currentEmailFrom,
         to: toEmail,
         subject,
-        html: htmlContent
+        text: textContent,
+        html: htmlContent,
+        headers: {
+          'X-Auto-Response-Suppress': 'OOF, AutoReply',
+          'Auto-Submitted': 'auto-generated'
+        }
       });
       return { success: true, messageId: info.messageId, mode: 'SMTP' };
     } catch (err) {
