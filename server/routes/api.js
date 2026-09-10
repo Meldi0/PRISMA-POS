@@ -8,6 +8,7 @@ import * as analyticsController from '../controllers/analyticsController.js';
 import * as dbConfigController from '../controllers/dbConfigController.js';
 import { pool } from '../config/db.js';
 import { rateLimit } from '../middleware/securityMiddleware.js';
+import { isSmtpReady, getTransporter } from '../utils/email.js';
 
 const router = express.Router();
 
@@ -35,6 +36,45 @@ router.get('/health', async (req, res) => {
       latency_ms: Date.now() - start
     });
   }
+});
+
+router.get('/smtp-status', async (req, res) => {
+  const isReady = isSmtpReady();
+  const host = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
+  const port = Number(process.env.SMTP_PORT || 587);
+  const rawUser = (process.env.SMTP_USER || '').trim();
+  const rawPass = (process.env.SMTP_PASS || '').trim();
+  
+  let verifyResult = null;
+  let errorDetail = null;
+  try {
+    const transporter = getTransporter();
+    if (transporter) {
+      await transporter.verify();
+      verifyResult = 'VERIFIED_OK';
+    } else {
+      verifyResult = 'TRANSPORTER_NULL';
+    }
+  } catch (err) {
+    verifyResult = 'VERIFY_FAILED';
+    errorDetail = {
+      message: err.message,
+      code: err.code,
+      command: err.command
+    };
+  }
+
+  res.json({
+    isReady,
+    host,
+    port,
+    user: rawUser ? rawUser.replace(/(.{2})(.*)(@.*)/, '$1***$3') : 'NOT_SET',
+    passLength: rawPass.length,
+    passHasSpaces: rawPass.includes(' '),
+    passHasQuotes: rawPass.includes('"') || rawPass.includes("'"),
+    verifyResult,
+    errorDetail
+  });
 });
 
 // -------------------------------------------------------------------------------------------------

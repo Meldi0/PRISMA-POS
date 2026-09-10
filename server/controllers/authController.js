@@ -22,7 +22,10 @@ async function profile(db, userId) {
 async function deliver(user, code) {
   if (!isSmtpReady()) throw new HttpError(503, 'Pengiriman kode verifikasi belum tersedia. Hubungi administrator untuk konfigurasi email.');
   const sent = await sendOtpEmail({ toEmail: user.email, recipientName: user.name, otpCode: code });
-  if (!sent.success) throw new HttpError(503, 'Kode verifikasi belum berhasil dikirim. Coba lagi nanti atau hubungi administrator.');
+  if (!sent.success) {
+    const errorMsg = sent.error ? `: ${sent.error}` : '';
+    throw new HttpError(503, `Kode verifikasi belum berhasil dikirim (${sent.mode}${errorMsg}). Coba lagi nanti atau hubungi administrator.`);
+  }
 }
 
 export const login = endpoint(async (req, res) => {

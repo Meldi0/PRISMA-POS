@@ -7,15 +7,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-// Inisialisasi transporter Nodemailer
-let transporter = null;
-
-const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
-const smtpPort = Number(process.env.SMTP_PORT || 465);
-const smtpUser = process.env.SMTP_USER || '';
-const smtpPass = process.env.SMTP_PASS || '';
-const emailFrom = process.env.EMAIL_FROM || (smtpUser ? `"PRISMA POS Helpdesk" <${smtpUser}>` : '"PRISMA POS Helpdesk" <no-reply@poso.local>');
-
 export function isSmtpReady() {
   const user = (process.env.SMTP_USER || '').trim();
   const pass = (process.env.SMTP_PASS || '').trim();
@@ -33,21 +24,30 @@ export function isSmtpReady() {
 
 export function getTransporter() {
   if (!isSmtpReady()) return null;
-  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const port = Number(process.env.SMTP_PORT || 587);
+  const host = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
+  const port = Number(process.env.SMTP_PORT || 465);
   const user = (process.env.SMTP_USER || '').trim();
-  const pass = (process.env.SMTP_PASS || '').trim();
+  const pass = (process.env.SMTP_PASS || '').trim().replace(/["']/g, '');
+  const cleanPass = pass.replace(/\s+/g, '');
+
+  if (host.includes('gmail.com') || user.endsWith('@gmail.com')) {
+    return nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user, pass: cleanPass },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000
+    });
+  }
 
   return nodemailer.createTransport({
     host,
     port,
     secure: port === 465,
-    auth: { user, pass },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-    requireTLS: port !== 465,
-    tls: { minVersion: 'TLSv1.2', rejectUnauthorized: true }
+    auth: { user, pass: cleanPass },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000
   });
 }
 
@@ -128,10 +128,10 @@ export async function sendOtpEmail({ toEmail, recipientName, otpCode }) {
       });
       return { success: true, messageId: info.messageId, mode: 'SMTP' };
     } catch (err) {
-      console.error('[Mailer] Pengiriman gagal:', err.code || 'SMTP_ERROR');
-      return { success: false, mode: 'SMTP_FAILED' };
+      console.error('[Mailer] Pengiriman gagal:', err);
+      return { success: false, mode: 'SMTP_FAILED', error: err.message || err.code || 'SMTP_ERROR', code: err.code };
     }
   } else {
-    return { success: false, mode: 'SMTP_UNAVAILABLE' };
+    return { success: false, mode: 'SMTP_UNAVAILABLE', error: 'SMTP Transporter belum dikonfigurasi' };
   }
 }
